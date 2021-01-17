@@ -1141,6 +1141,12 @@ config GPIO_BD71815
 	  This driver can also be built as a module. If so, the module
 	  will be called gpio-bd71815.
 
+config GPIO_BD7181X
+	tristate "BD7181X GPO"
+	depends on MFD_ROHM_BD718XX
+	help
+	  Say yes here to access the GPO signals of bd71815/bd71817 chip from ROHM.
+
 config GPIO_BD71828
 	tristate "ROHM BD71828 GPIO support"
 	depends on MFD_ROHM_BD71828
