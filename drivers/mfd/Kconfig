@@ -1934,10 +1934,10 @@ config MFD_ROHM_BD718XX
 	select REGMAP_IRQ
 	select MFD_CORE
 	help
-	  Select this option to get support for the ROHM BD71837
-	  Power Management ICs. BD71837 is designed to power processors like
-	  NXP i.MX8. It contains 8 BUCK outputs and 7 LDOs, voltage monitoring
-	  and emergency shut down as well as 32,768KHz clock output.
+	  Select this option to get support for the ROHM BD71837/BD71815
+	  Power Management ICs. BD71837/BD71815 are designed to power processors
+	  like the NXP i.MX8. It contains 8 BUCK outputs and 7 LDOs, voltage
+	  monitoring and emergency shut down as well as 32,768KHz clock output.
 
 config MFD_ROHM_BD71828
 	tristate "ROHM BD71828 and BD71815 Power Management IC"
