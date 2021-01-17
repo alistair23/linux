@@ -111,6 +111,10 @@
 	};
 };
 
+&cpu0 {
+	cpu-supply = <&buck1_reg>;
+};
+
 &clks {
 	assigned-clocks = <&clks IMX7D_CLKO2_ROOT_SRC>,
 			  <&clks IMX7D_CLKO2_ROOT_DIV>;
@@ -135,6 +139,145 @@
 		touchscreen-inverted-x;
 		touchscreen-inverted-y;
 		vdd-supply = <&reg_digitizer>;
+	};
+};
+
+&i2c2 {
+	clock-frequency = <100000>;
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-1 = <&pinctrl_i2c2>;
+	status = "okay";
+
+	pmic: bd71815@4b {
+		reg = <0x4b>;
+		compatible = "rohm,bd71815";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_bd71815>;
+		/* PMIC_INT_B GPIO6_IO16 */
+		interrupt-parent = <&gpio6>;
+		interrupts = <16 IRQ_TYPE_LEVEL_LOW>;
+		gpio_intr = <&gpio6 16 0>;
+
+		regulators {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			buck1_reg: regulator@0 {
+				reg = <0>;
+				regulator-compatible = "buck1";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <2000000>;
+				regulator-boot-on;
+				regulator-always-on;
+				regulator-ramp-delay = <1250>;
+			};
+
+			buck2_reg: regulator@1 {
+				reg = <1>;
+				regulator-compatible = "buck2";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <2000000>;
+				regulator-boot-on;
+				regulator-always-on;
+				regulator-ramp-delay = <1250>;
+			};
+
+			buck3_reg: regulator@2 {
+				reg = <2>;
+				regulator-compatible = "buck3";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <2700000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			buck4_reg: regulator@3 {
+				reg = <3>;
+				regulator-compatible = "buck4";
+				regulator-min-microvolt = <1100000>;
+				regulator-max-microvolt = <1850000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			buck5_reg: regulator@4 {
+				reg = <4>;
+				regulator-compatible = "buck5";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			ldo1_reg: regulator@5 {
+				reg = <5>;
+				regulator-compatible = "ldo1";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			ldo2_reg: regulator@6 {
+				reg = <6>;
+				regulator-compatible = "ldo2";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			ldo3_reg: regulator@7 {
+				reg = <7>;
+				regulator-compatible = "ldo3";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			ldo4_reg: regulator@8 {
+				reg = <8>;
+				regulator-compatible = "ldo4";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			ldo5_reg: regulator@9 {
+				reg = <9>;
+				regulator-compatible = "ldo5";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			dvref_reg: regulator@10 {
+				reg = <10>;
+				regulator-compatible = "dvref";
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			lpsr_reg: regulator@11 {
+				reg = <11>;
+				regulator-compatible = "lpsr";
+				regulator-boot-on;
+				regulator-always-on;
+			};
+
+			wled_reg: regulator@12 {
+				reg = <12>;
+				regulator-compatible = "wled";
+				regulator-min-microamp = <10>;
+				regulator-max-microamp = <25000>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+		};
 	};
 };
 
@@ -335,6 +478,12 @@
 };
 
 &iomuxc {
+	pinctrl_bd71815: bd71815grp {
+		fsl,pins = <
+			MX7D_PAD_SAI1_RX_SYNC__GPIO6_IO16	0x59
+		>;
+	};
+
 	pinctrl_brcm_reg: brcmreggrp {
 		fsl,pins = <
 			/* WIFI_PWR_EN */
@@ -362,6 +511,13 @@
 		fsl,pins = <
 			MX7D_PAD_I2C1_SDA__I2C1_SDA		0x4000007f
 			MX7D_PAD_I2C1_SCL__I2C1_SCL		0x4000007f
+		>;
+	};
+
+	pinctrl_i2c2: i2c2grp {
+		fsl,pins = <
+			MX7D_PAD_I2C2_SDA__I2C2_SDA		0x4000007f
+			MX7D_PAD_I2C2_SCL__I2C2_SCL		0x4000007f
 		>;
 	};
 
