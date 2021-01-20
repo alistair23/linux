@@ -135,6 +135,8 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_bd71815>;
 		/* PMIC_INT_B GPIO6_IO16 */
+		interrupt-parent = <&gpio6>;
+		interrupts = <16 IRQ_TYPE_LEVEL_LOW>;
 		gpio_intr = <&gpio6 16 0>;
 
 		regulators {
