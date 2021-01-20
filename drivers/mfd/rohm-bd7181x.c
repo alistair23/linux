@@ -155,9 +155,6 @@ static int bd7181x_irq_init(struct bd7181x *bd7181x, struct bd7181x_board* bdinf
 		return -EINVAL;
 	}
 	
-	irq = gpio_to_irq(bdinfo->gpio_intr);
-
-	bd7181x->chip_irq = irq;
 	printk("bd7181x->chip_irq=%d \n", bd7181x->chip_irq);
 	ret = regmap_add_irq_chip(bd7181x->regmap, bd7181x->chip_irq,
 		IRQF_ONESHOT | IRQF_TRIGGER_FALLING, bdinfo->irq_base,
@@ -239,12 +236,6 @@ static struct bd7181x_board *bd7181x_parse_dt(struct i2c_client *client,
 	if (!board_info) {
 		dev_err(&client->dev, "Failed to allocate pdata\n");
 		return NULL;
-	}
-
-	board_info->gpio_intr = of_get_named_gpio(np, "gpio_intr", 0);
-	if (!gpio_is_valid(board_info->gpio_intr)) {
-		dev_err(&client->dev, "no pmic intr pin available\n");
-		goto err_intr;
 	}
 
 	r = of_property_read_u32(np, "irq_base", &prop);
@@ -391,6 +382,7 @@ static int bd7181x_i2c_probe(struct i2c_client *i2c,
 	}
 	dev_info(bd7181x->dev, "BD7181x: Device ID=0x%X\n", ret);
 
+	bd7181x->chip_irq = i2c->irq;
 	bd7181x_irq_init(bd7181x, of_pmic_plat_data);
 
 	ret = mfd_add_devices(bd7181x->dev, -1,
