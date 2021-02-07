@@ -167,12 +167,33 @@ enum max17047_register {
 	MAX17047_QRTbl30	= 0x42,
 };
 
+/* Registers specific to max77818 */
+enum max77818_register {
+	MAX77818_TTF		= 0x20,
+	MAX77818_ConvgCfg	= 0x49,
+	MAX77818_TALRT_Th2	= 0xB2,
+	MAX77818_TCURVE		= 0xB9,
+	MAX77818_Config2	= 0xBB,
+	MAX77818_ChargeState0	= 0xD1,
+	MAX77818_ChargeState1	= 0xD2,
+	MAX77818_ChargeState2	= 0xD3,
+	MAX77818_ChargeState3	= 0xD4,
+	MAX77818_ChargeState4	= 0xD5,
+	MAX77818_ChargeState5	= 0xD6,
+	MAX77818_ChargeState6	= 0xD7,
+	MAX77818_ChargeState7	= 0xD8,
+	MAX77818_JEITA_Volt	= 0xD9,
+	MAX77818_JEITA_Curr	= 0xDA,
+	MAX77818_SmartChgCfg	= 0xDB,
+};
+
 enum max170xx_chip_type {
 	MAXIM_DEVICE_TYPE_UNKNOWN	= 0,
 	MAXIM_DEVICE_TYPE_MAX17042,
 	MAXIM_DEVICE_TYPE_MAX17047,
 	MAXIM_DEVICE_TYPE_MAX17050,
 	MAXIM_DEVICE_TYPE_MAX17055,
+	MAXIM_DEVICE_TYPE_MAX77818,
 
 	MAXIM_DEVICE_TYPE_NUM
 };
