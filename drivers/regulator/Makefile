@@ -32,6 +32,7 @@ obj-$(CONFIG_REGULATOR_BCM590XX) += bcm590xx-regulator.o
 obj-$(CONFIG_REGULATOR_BD71815)	+= bd71815-regulator.o
 obj-$(CONFIG_REGULATOR_BD71828) += bd71828-regulator.o
 obj-$(CONFIG_REGULATOR_BD718XX) += bd718x7-regulator.o
+obj-$(CONFIG_REGULATOR_BD7181X) += bd7181x-regulator.o
 obj-$(CONFIG_REGULATOR_BD9571MWV) += bd9571mwv-regulator.o
 obj-$(CONFIG_REGULATOR_BD957XMUF) += bd9576-regulator.o
 obj-$(CONFIG_REGULATOR_DA903X)	+= da903x-regulator.o
