@@ -415,6 +415,32 @@ config BATTERY_MAX1721X
 	  Say Y here to enable support for the MAX17211/MAX17215 standalone
 	  battery gas-gauge.
 
+config BATTERY_MAX77818_UTILS
+	tristate "Maxime MAX77818 Fuel Gauge common/external functions"
+	help
+	  This is automatically selected when the MAX77818 MFD driver is
+	  selected, due to required Max77818 Fuel Gauge device access during
+	  initiation of the MFD device.
+										.
+config BATTERY_MAX77818
+	tristate "Maxime MAX77818 Fuel Gauge"
+	depends on I2C
+	depends on MFD_MAX77818
+	help
+		Say Y yo enable support for Maxime MAX77818 battery fuel-gauge device (part of MAX77818 multi-function reg/chrg/fg device)
+
+config BATTERY_Z2
+	tristate "Z2 battery driver"
+	depends on I2C && MACH_ZIPIT2
+	help
+	  Say Y to include support for the battery on the Zipit Z2.
+
+config BATTERY_S3C_ADC
+	tristate "Battery driver for Samsung ADC based monitoring"
+	depends on S3C_ADC
+	help
+	  Say Y here to enable support for iPAQ h1930/h1940/rx1950 battery
+
 config BATTERY_TWL4030_MADC
 	tristate "TWL4030 MADC battery driver"
 	depends on TWL4030_MADC
@@ -614,6 +640,13 @@ config CHARGER_MT6370
 
 	  This driver can also be built as a module. If so, the module
 	  will be called "mt6370-charger".
+
+config CHARGER_MAX77818
+	tristate "Maxime MAX77818 battery charger driver"
+	depends on I2C
+	depends on MFD_MAX77818
+	help
+		Say Y yo enable support for Maxime MAX77818 charger device (part of MAX77818 multi-function reg/chrg/fg device)
 
 config CHARGER_QCOM_SMBB
 	tristate "Qualcomm Switch-Mode Battery Charger and Boost"
