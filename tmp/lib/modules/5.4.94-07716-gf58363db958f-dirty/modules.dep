@@ -1,0 +1,26 @@
+kernel/fs/fat/msdos.ko:
+kernel/fs/nls/nls_iso8859-15.ko:
+kernel/fs/binfmt_misc.ko:
+kernel/fs/isofs/isofs.ko:
+kernel/fs/udf/udf.ko: kernel/lib/crc-itu-t.ko
+kernel/crypto/tcrypt.ko:
+kernel/drivers/dma/dmatest.ko:
+kernel/drivers/net/wireless/ath/ath6kl/ath6kl_core.ko:
+kernel/drivers/net/wireless/ath/ath6kl/ath6kl_sdio.ko: kernel/drivers/net/wireless/ath/ath6kl/ath6kl_core.ko
+kernel/drivers/net/wireless/broadcom/brcm80211/brcmutil/brcmutil.ko:
+kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac/brcmfmac.ko: kernel/drivers/net/wireless/broadcom/brcm80211/brcmutil/brcmutil.ko
+kernel/drivers/net/usb/cdc_eem.ko:
+kernel/drivers/usb/misc/usbtest.ko:
+kernel/drivers/usb/class/cdc-acm.ko:
+kernel/drivers/usb/serial/usbserial.ko:
+kernel/drivers/usb/serial/ftdi_sio.ko: kernel/drivers/usb/serial/usbserial.ko
+kernel/drivers/usb/serial/option.ko: kernel/drivers/usb/serial/usb_wwan.ko kernel/drivers/usb/serial/usbserial.ko
+kernel/drivers/usb/serial/usb_wwan.ko: kernel/drivers/usb/serial/usbserial.ko
+kernel/drivers/input/serio/serport.ko:
+kernel/drivers/input/mouse/psmouse.ko:
+kernel/drivers/i2c/algos/i2c-algo-pcf.ko:
+kernel/drivers/i2c/algos/i2c-algo-pca.ko:
+kernel/lib/crc-ccitt.ko:
+kernel/lib/crc-itu-t.ko:
+kernel/lib/crc7.ko:
+kernel/lib/libcrc32c.ko:

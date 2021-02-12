@@ -602,6 +602,8 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	suspend_state_t state;
 	int error;
 
+	printk("%s - %d\n", __func__, __LINE__);
+
 	error = pm_autosleep_lock();
 	if (error)
 		return error;

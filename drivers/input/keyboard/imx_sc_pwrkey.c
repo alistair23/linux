@@ -75,6 +75,8 @@ static void imx_sc_check_for_events(struct work_struct *work)
 	struct imx_sc_rpc_msg *hdr = &msg.hdr;
 	bool state;
 
+	printk("%s - %d\n", __func__, __LINE__);
+
 	hdr->ver = IMX_SC_RPC_VERSION;
 	hdr->svc = IMX_SC_RPC_SVC_MISC;
 	hdr->func = IMX_SC_MISC_FUNC_GET_BUTTON_STATUS;

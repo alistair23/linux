@@ -28,6 +28,8 @@ static void try_to_suspend(struct work_struct *work)
 {
 	unsigned int initial_count, final_count;
 
+	printk("%s - %d\n", __func__, __LINE__);
+
 	if (!pm_get_wakeup_count(&initial_count, true))
 		goto out;
 

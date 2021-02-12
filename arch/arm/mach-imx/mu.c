@@ -165,7 +165,7 @@ static int imx_mu_send_message(unsigned int index, unsigned int data)
 		}
 	}
 	if (te_flag == 0)
-		pr_info("BUG: TEn is not changed immediately"
+		pr_err("BUG: TEn is not changed immediately"
 				"when ATRn is filled up.\n");
 
 	return 0;
@@ -183,7 +183,7 @@ static void mu_work_handler(struct work_struct *work)
 	message = m4_message[out_idx % MAX_NUM];
 	spin_unlock_irqrestore(&mu_lock, flags);
 
-	pr_debug("receive M4 message 0x%x\n", message);
+	pr_err("receive M4 message 0x%x\n", message);
 
 	switch (message) {
 	case MU_LPM_M4_RUN_MODE:
@@ -215,6 +215,7 @@ static void mu_work_handler(struct work_struct *work)
 		m4_freq_low = true;
 		break;
 	default:
+		pr_err("mu_work_handler: default\n");
 		if ((message & MU_LPM_M4_WAKEUP_SRC_MASK) ==
 			MU_LPM_M4_WAKEUP_SRC_VAL) {
 			irq = (message & MU_LPM_M4_WAKEUP_IRQ_MASK) >>
@@ -291,6 +292,8 @@ static irqreturn_t imx_mu_isr(int irq, void *param)
 {
 	u32 irqs;
 	unsigned long flags;
+
+	pr_err("MU imx_mu_isr\n");
 
 	if (cpu_is_imx7ulp())
 		irqs = readl_relaxed(mu_base + MX7ULP_MU_SR);
@@ -384,7 +387,7 @@ static int imx_mu_probe(struct platform_device *pdev)
 		writel_relaxed(readl_relaxed(mu_base + MU_ACR) |
 			BIT(26) | BIT(27), mu_base + MU_ACR);
 
-	pr_info("MU is ready for cross core communication!\n");
+	pr_err("MU is ready for cross core communication!\n");
 
 	return 0;
 }

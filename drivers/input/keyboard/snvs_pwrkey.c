@@ -48,16 +48,24 @@ static void imx_imx_snvs_check_for_events(struct timer_list *t)
 	struct input_dev *input = pdata->input;
 	u32 state;
 
+	printk("imx_imx_snvs_check_for_events\n");
+
 	if (pdata->clk) {
-		if (pdata->suspended)
+		printk("  imx_imx_snvs_check_for_events: have a clock\n");
+		if (pdata->suspended) {
+			printk("    imx_imx_snvs_check_for_events: suspended\n");
 			clk_prepare_enable(pdata->clk);
-		else
+		}
+		else {
+			printk("    imx_imx_snvs_check_for_events: not suspended\n");
 			clk_enable(pdata->clk);
+		}
 	}
 
 	regmap_read(pdata->snvs, SNVS_HPSR_REG, &state);
 
 	if (pdata->clk) {
+		printk("  imx_imx_snvs_check_for_events: have a clock 2\n");
 		if (pdata->suspended)
 			clk_disable_unprepare(pdata->clk);
 		else
@@ -68,6 +76,7 @@ static void imx_imx_snvs_check_for_events(struct timer_list *t)
 
 	/* only report new event if status changed */
 	if (state ^ pdata->keystate) {
+		printk("  imx_imx_snvs_check_for_events: status changed: %d\n", state);
 		pdata->keystate = state;
 		input_event(input, EV_KEY, pdata->keycode, state);
 		input_sync(input);
@@ -76,6 +85,7 @@ static void imx_imx_snvs_check_for_events(struct timer_list *t)
 
 	/* repeat check if pressed long */
 	if (state) {
+		printk("  imx_imx_snvs_check_for_events: state: %d\n", state);
 		mod_timer(&pdata->check_timer,
 			  jiffies + msecs_to_jiffies(REPEAT_INTERVAL));
 	}
@@ -88,26 +98,35 @@ static irqreturn_t imx_snvs_pwrkey_interrupt(int irq, void *dev_id)
 	struct input_dev *input = pdata->input;
 	u32 lp_status;
 
+	printk("imx_snvs_pwrkey_interrupt\n");
+
 	pm_wakeup_event(pdata->input->dev.parent, 0);
 
-	if (pdata->clk)
+	if (pdata->clk) {
+		printk("  imx_snvs_pwrkey_interrupt: clock enable\n");
 		clk_enable(pdata->clk);
+	}
 
 	if (pdata->suspended) {
+		printk("  imx_snvs_pwrkey_interrupt: suspended\n");
 		pdata->keystate = 1;
 		input_event(input, EV_KEY, pdata->keycode, 1);
 		input_sync(input);
 	}
 
 	regmap_read(pdata->snvs, SNVS_LPSR_REG, &lp_status);
-	if (lp_status & SNVS_LPSR_SPO)
+	if (lp_status & SNVS_LPSR_SPO) {
+		printk("  imx_snvs_pwrkey_interrupt: Setting timer\n");
 		mod_timer(&pdata->check_timer, jiffies + msecs_to_jiffies(DEBOUNCE_TIME));
+	}
 
 	/* clear SPO status */
 	regmap_write(pdata->snvs, SNVS_LPSR_REG, SNVS_LPSR_SPO);
 
-	if (pdata->clk)
+	if (pdata->clk) {
+		printk("  imx_snvs_pwrkey_interrupt: disable timer\n");
 		clk_disable(pdata->clk);
+	}
 
 	return IRQ_HANDLED;
 }

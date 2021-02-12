@@ -75,6 +75,8 @@ void imx_gpc_hold_m4_in_sleep(void)
 	int val;
 	unsigned long timeout = jiffies + msecs_to_jiffies(500);
 
+	printk("%s - %d\n", __func__, __LINE__);
+
 	/* wait M4 in wfi before asserting hold request */
 	while (!imx_gpc_is_m4_sleeping())
 		if (time_after(jiffies, timeout))
@@ -231,6 +233,8 @@ static int imx_gpc_irq_set_wake(struct irq_data *d, unsigned int on)
 	unsigned int idx = d->hwirq / 32;
 	unsigned long flags;
 	u32 mask;
+
+	printk("%s - %d\n", __func__, __LINE__);
 
 	mask = 1 << d->hwirq % 32;
 	spin_lock_irqsave(&gpc_lock, flags);

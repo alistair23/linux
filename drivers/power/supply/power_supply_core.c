@@ -79,7 +79,7 @@ static void power_supply_changed_work(struct work_struct *work)
 	struct power_supply *psy = container_of(work, struct power_supply,
 						changed_work);
 
-	dev_dbg(&psy->dev, "%s\n", __func__);
+	printk("%s - %d\n", __func__, __LINE__);
 
 	spin_lock_irqsave(&psy->changed_lock, flags);
 	/*

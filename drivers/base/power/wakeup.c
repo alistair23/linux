@@ -771,6 +771,8 @@ void pm_relax(struct device *dev)
 {
 	unsigned long flags;
 
+	printk("%s - %d\n", __func__, __LINE__);
+
 	if (!dev)
 		return;
 

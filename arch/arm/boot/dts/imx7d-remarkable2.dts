@@ -168,6 +168,14 @@
 	};
 };
 
+// &mu {
+// 	status = "disabled";
+// };
+
+&ocrams {
+	fsl,enable-lpsr;
+};
+
 &cpu0 {
 	cpu-supply = <&buck1_reg>;
 };
