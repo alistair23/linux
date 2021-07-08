@@ -739,14 +739,14 @@ static int upgrade_firmware_from_class(struct device *dev)
 
 	dev_vdbg(dev, "%s: Enabling firmware class loader\n", __func__);
 
-	retval = request_firmware_nowait(THIS_MODULE, FW_ACTION_NOHOTPLUG,
-			CY_FW_MANUAL_UPGRADE_FILE_NAME, dev, GFP_KERNEL, dev,
-			_cyttsp5_firmware_cont);
-	if (retval < 0) {
-		dev_err(dev, "%s: Fail request firmware class file load\n",
-			__func__);
-		return retval;
-	}
+	// retval = request_firmware_nowait(THIS_MODULE, FW_ACTION_NOHOTPLUG,
+	// 		CY_FW_MANUAL_UPGRADE_FILE_NAME, dev, GFP_KERNEL, dev,
+	// 		_cyttsp5_firmware_cont);
+	// if (retval < 0) {
+	// 	dev_err(dev, "%s: Fail request firmware class file load\n",
+	// 		__func__);
+	// 	return retval;
+	// }
 
 	return 0;
 }
@@ -791,14 +791,14 @@ static int upgrade_firmware_from_builtin(struct device *dev)
 	if (!filename)
 		return -ENOMEM;
 
-	retval = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
-			filename, dev, GFP_KERNEL, dev,
-			_cyttsp5_firmware_cont_builtin);
-	if (retval < 0) {
-		dev_err(dev, "%s: Fail request firmware class file load\n",
-			__func__);
-		goto exit;
-	}
+	// retval = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
+	// 		filename, dev, GFP_KERNEL, dev,
+	// 		_cyttsp5_firmware_cont_builtin);
+	// if (retval < 0) {
+	// 	dev_err(dev, "%s: Fail request firmware class file load\n",
+	// 		__func__);
+	// 	goto exit;
+	// }
 
 	/* wait until FW binary upgrade finishes */
 	wait_for_completion(&ld->builtin_bin_fw_complete);
