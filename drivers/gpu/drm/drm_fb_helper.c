@@ -1300,17 +1300,28 @@ int drm_fb_helper_check_var(struct fb_var_screeninfo *var,
 	struct drm_framebuffer *fb = fb_helper->fb;
 	struct drm_device *dev = fb_helper->dev;
 
-	if (in_dbg_master())
+	printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+
+	if (in_dbg_master()) {
+		printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
 		return -EINVAL;
+	}
+
+	printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
 
 	if (var->pixclock != 0) {
-		drm_dbg_kms(dev, "fbdev emulation doesn't support changing the pixel clock, value of pixclock is ignored\n");
+		printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+		printk(KERN_ALERT "fbdev emulation doesn't support changing the pixel clock, value of pixclock is ignored\n");
 		var->pixclock = 0;
 	}
 
 	if ((drm_format_info_block_width(fb->format, 0) > 1) ||
-	    (drm_format_info_block_height(fb->format, 0) > 1))
-		return -EINVAL;
+	    (drm_format_info_block_height(fb->format, 0) > 1)) {
+			printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+			return -EINVAL;
+		}
+
+	printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
 
 	/*
 	 * Changes struct fb_var_screeninfo are currently not pushed back
@@ -1319,13 +1330,20 @@ int drm_fb_helper_check_var(struct fb_var_screeninfo *var,
 	if (var->bits_per_pixel > fb->format->cpp[0] * 8 ||
 	    var->xres > fb->width || var->yres > fb->height ||
 	    var->xres_virtual > fb->width || var->yres_virtual > fb->height) {
-		drm_dbg_kms(dev, "fb requested width/height/bpp can't fit in current fb "
+		printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+		printk(KERN_ALERT "fb requested width/height/bpp can't fit in current fb "
 			  "request %dx%d-%d (virtual %dx%d) > %dx%d-%d\n",
 			  var->xres, var->yres, var->bits_per_pixel,
 			  var->xres_virtual, var->yres_virtual,
 			  fb->width, fb->height, fb->format->cpp[0] * 8);
 		return -EINVAL;
 	}
+
+	printk(KERN_ALERT "fb requested width/height/bpp CAN fit in current fb "
+		  "request %dx%d-%d (virtual %dx%d) > %dx%d-%d\n",
+		  var->xres, var->yres, var->bits_per_pixel,
+		  var->xres_virtual, var->yres_virtual,
+		  fb->width, fb->height, fb->format->cpp[0] * 8);
 
 	/*
 	 * Workaround for SDL 1.2, which is known to be setting all pixel format
@@ -1341,6 +1359,8 @@ int drm_fb_helper_check_var(struct fb_var_screeninfo *var,
 		drm_fb_helper_fill_pixel_fmt(var, fb->format->depth);
 	}
 
+	printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+
 	/*
 	 * Likewise, bits_per_pixel should be rounded up to a supported value.
 	 */
@@ -1351,7 +1371,8 @@ int drm_fb_helper_check_var(struct fb_var_screeninfo *var,
 	 * so reject all pixel format changing requests.
 	 */
 	if (!drm_fb_pixel_format_equal(var, &info->var)) {
-		drm_dbg_kms(dev, "fbdev emulation doesn't support changing the pixel format\n");
+		printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+		printk(KERN_ALERT "fbdev emulation doesn't support changing the pixel format\n");
 		return -EINVAL;
 	}
 
@@ -1569,7 +1590,7 @@ static int drm_fb_helper_single_fb_probe(struct drm_fb_helper *fb_helper,
 		struct drm_plane *plane = crtc->primary;
 		int j;
 
-		drm_dbg_kms(dev, "test CRTC %u primary plane\n", drm_crtc_index(crtc));
+		printk(KERN_ALERT "test CRTC %u primary plane\n", drm_crtc_index(crtc));
 
 		for (j = 0; j < plane->format_count; j++) {
 			const struct drm_format_info *fmt;
@@ -2313,7 +2334,7 @@ static int drm_fb_helper_generic_probe(struct drm_fb_helper *fb_helper,
 	struct dma_buf_map map;
 	int ret;
 
-	drm_dbg_kms(dev, "surface width(%d), height(%d) and bpp(%d)\n",
+	printk(KERN_ALERT "surface width(%d), height(%d) and bpp(%d)\n",
 		    sizes->surface_width, sizes->surface_height,
 		    sizes->surface_bpp);
 
@@ -2407,7 +2428,7 @@ static int drm_fbdev_client_hotplug(struct drm_client_dev *client)
 		return drm_fb_helper_hotplug_event(dev->fb_helper);
 
 	if (!dev->mode_config.num_connector) {
-		drm_dbg_kms(dev, "No connectors found, will not create framebuffer!\n");
+		printk(KERN_ALERT "No connectors found, will not create framebuffer!\n");
 		return 0;
 	}
 
@@ -2509,7 +2530,7 @@ void drm_fbdev_generic_setup(struct drm_device *dev,
 
 	ret = drm_fbdev_client_hotplug(&fb_helper->client);
 	if (ret)
-		drm_dbg_kms(dev, "client hotplug ret=%d\n", ret);
+		printk(KERN_ALERT "client hotplug ret=%d\n", ret);
 
 	drm_client_register(&fb_helper->client);
 }

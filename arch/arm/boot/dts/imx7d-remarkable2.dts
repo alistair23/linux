@@ -99,6 +99,16 @@
 		clock-names = "ext_clock";
 	};
 
+	panel {
+		compatible = "eink,vb3300-kca";
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&display_out>;
+			};
+		};
+	};
+
 	otgcontrol: otgcontrol1 {
 		pinctrl-names = "default", "one_wire_uart_tx", "one_wire_uart_rx",
 				"sleep";
@@ -505,32 +515,11 @@
 	pinctrl-0 = <&pinctrl_lcdif>;
 	lcd-supply = <&reg_epdpmic>;
 	lcd2-supply = <&reg_sdoe>;
-	display = <&display0>;
-	prevent-frying-pan;
 	status = "okay";
 
-	display0: display {
-		bits-per-pixel = <24>;
-		bus-width = <24>;
-
-		display-timings {
-			native-mode = <&timing0>;
-
-			timing0: timing0 {
-				clock-frequency = <40000000>;
-				hactive = <334>;
-				vactive = <1405>;
-				hfront-porch = <1>;
-				hback-porch = <1>;
-				hsync-len = <1>;
-				vback-porch = <1>;
-				vfront-porch = <1>;
-				vsync-len = <1>;
-				hsync-active = <0>;
-				vsync-active = <0>;
-				de-active = <1>;
-				pixelclk-active = <1>;
-			};
+	port {
+		display_out: endpoint {
+			remote-endpoint = <&panel_in>;
 		};
 	};
 };

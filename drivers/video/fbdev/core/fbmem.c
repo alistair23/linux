@@ -1000,7 +1000,10 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 			return -EINVAL;
 	}
 
+	printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
+
 	if (!info->fbops->fb_check_var) {
+		printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
 		*var = info->var;
 		return 0;
 	}
@@ -1014,10 +1017,13 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 	    check_mul_overflow(var->xres_virtual, var->yres_virtual, &unused))
 		return -EINVAL;
 
+	printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
 	ret = info->fbops->fb_check_var(var, info);
 
-	if (ret)
+	if (ret) {
+		printk(KERN_ALERT "** %s - %d\n", __func__, __LINE__);
 		return ret;
+	}
 
 	if ((var->activate & FB_ACTIVATE_MASK) != FB_ACTIVATE_NOW)
 		return 0;
