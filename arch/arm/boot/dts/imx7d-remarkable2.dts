@@ -108,6 +108,19 @@
 			};
 		};
 	};
+
+	otgcontrol: otgcontrol1 {
+		pinctrl-names = "default", "one_wire_uart_tx", "one_wire_uart_rx",
+				"sleep";
+		pinctrl-0 = <&pinctrl_one_wire_gpio>;
+		pinctrl-1 = <&pinctrl_one_wire_uart6_tx>;
+		pinctrl-2 = <&pinctrl_one_wire_uart6_rx>;
+		pinctrl-3 = <&pinctrl_one_wire_gpio>;
+		compatible = "rm-otgcontrol";
+		vbus-supply =<&max77818_fg>;
+		one-wire-tty-name = "ttymxc5";
+		one-wire-gpios = <&gpio2 8 GPIO_ACTIVE_LOW>;
+	};
 };
 
 &cpu0 {
@@ -429,6 +442,15 @@
 	status = "okay";
 };
 
+&usbotg1 {
+	extcon = <0 &otgcontrol>;
+	srp-disable;
+	hnp-disable;
+	dp-disable;
+	phy-charger-detection;
+	status = "okay";
+};
+
 &usbotg2 {
 	srp-disable;
 	hnp-disable;
@@ -583,6 +605,27 @@
 			MX7D_PAD_LCD_VSYNC__LCD_VSYNC		0x79
 			MX7D_PAD_LCD_HSYNC__LCD_HSYNC		0x79
 			MX7D_PAD_LCD_RESET__LCD_RESET		0x79
+		>;
+	};
+
+	pinctrl_one_wire_gpio: one_wire_gpio_grp {
+		fsl,pins = <
+			MX7D_PAD_EPDC_DATA08__GPIO2_IO8		0x00000004
+			MX7D_PAD_EPDC_DATA09__GPIO2_IO9		0x00000004
+		>;
+	};
+
+	pinctrl_one_wire_uart6_tx: one_wire_uart6_tx_grp {
+		fsl,pins = <
+			MX7D_PAD_EPDC_DATA08__GPIO2_IO8		0x00000004
+			MX7D_PAD_EPDC_DATA09__UART6_DCE_TX	0x00000079
+		>;
+	};
+
+	pinctrl_one_wire_uart6_rx: one_wire_uart6_rx_grp {
+		fsl,pins = <
+			MX7D_PAD_EPDC_DATA08__UART6_DCE_RX	0x00000079
+			MX7D_PAD_EPDC_DATA09__GPIO2_IO9		0x00000004
 		>;
 	};
 
