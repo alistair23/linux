@@ -26,7 +26,8 @@
 #include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/fs.h>
-#include <asm/uaccess.h>
+#include <linux/mm.h>
+#include <linux/uaccess.h>
 #include <linux/mutex.h>
 
 #define ONE_WIRE_GPIO_DEBOUNCE_MS	500	/* ms */
@@ -371,7 +372,6 @@ int otgcontrol_onewire_write_tty(struct rm_otgcontrol_data *otgc_data,
 {
 	struct file *f;
 	char buf[128];
-	mm_segment_t fs;
 	int i;
 
 	for(i = 0;i < 128;i++)
@@ -393,13 +393,9 @@ int otgcontrol_onewire_write_tty(struct rm_otgcontrol_data *otgc_data,
 			"%s: Getting current segment descriptor\n",
 			__func__);
 
-		fs = get_fs();
-
 		dev_dbg(otgc_data->dev,
 			"%s: Setting segment descriptor\n",
 			__func__);
-
-		set_fs(KERNEL_DS);
 
 		dev_dbg(otgc_data->dev,
 			"%s: Writing '%s' to file\n",
@@ -415,8 +411,6 @@ int otgcontrol_onewire_write_tty(struct rm_otgcontrol_data *otgc_data,
 			"%s: Restoring segment descriptor\n",
 			__func__);
 
-		set_fs(fs);
-
 		dev_dbg(otgc_data->dev,
 			"%s: Closing file\n",
 			__func__);
@@ -429,7 +423,6 @@ int otgcontrol_onewire_write_tty(struct rm_otgcontrol_data *otgc_data,
 int otgcontrol_onewire_read_until_cr(struct rm_otgcontrol_data *otgc_data, char *device_name, char *buf, int maxlen)
 {
 	struct file *f;
-	mm_segment_t fs;
 	char newchar;
 	int pos, state;
 
@@ -445,13 +438,9 @@ int otgcontrol_onewire_read_until_cr(struct rm_otgcontrol_data *otgc_data, char 
 			"%s: Getting current segment descriptor\n",
 			__func__);
 
-		fs = get_fs();
-
 		dev_dbg(otgc_data->dev,
 			"%s: Setting segment descriptor\n",
 			__func__);
-
-		set_fs(KERNEL_DS);
 
 		pos = 0;
 		state = 0;
@@ -494,8 +483,6 @@ int otgcontrol_onewire_read_until_cr(struct rm_otgcontrol_data *otgc_data, char 
 		dev_dbg(otgc_data->dev,
 			"%s: Restoring segment descriptor\n",
 			__func__);
-
-		set_fs(fs);
 
 		dev_dbg(otgc_data->dev,
 			"%s: Closing file\n",
