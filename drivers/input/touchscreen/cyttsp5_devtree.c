@@ -95,7 +95,7 @@ static s16 *create_and_get_u16_array(struct device_node *dev_node,
 		return NULL;
 
 	sz = len / sizeof(u32);
-	pr_debug("%s: %s size:%d\n", __func__, name, sz);
+	printk(KERN_ERR "%s: %s size:%d\n", __func__, name, sz);
 
 	val_array = kcalloc(sz, sizeof(s16), GFP_KERNEL);
 	if (!val_array) {
@@ -478,7 +478,7 @@ static struct touch_settings *create_and_get_touch_setting(
 	if (IS_ERR_OR_NULL(data))
 		return (void *)data;
 
-	pr_debug("%s: Touch setting:'%s' size:%d\n", __func__, name, size);
+	printk(KERN_ERR "%s: Touch setting:'%s' size:%d\n", __func__, name, size);
 
 	setting = kzalloc(sizeof(*setting), GFP_KERNEL);
 	if (!setting) {
@@ -605,11 +605,11 @@ static struct cyttsp5_core_platform_data *create_and_get_core_pdata(
 			rc = PTR_ERR(pdata->sett[i]);
 			goto fail_free_sett;
 		} else if (pdata->sett[i] == NULL)
-			pr_debug("%s: No data for setting '%s'\n", __func__,
+			printk(KERN_ERR "%s: No data for setting '%s'\n", __func__,
 				touch_setting_names[i]);
 	}
 
-	pr_debug("%s: irq_gpio:%d rst_gpio:%d\n"
+	printk(KERN_ERR "%s: irq_gpio:%d rst_gpio:%d\n"
 		"hid_desc_register:%d level_irq_udelay:%d vendor_id:%d product_id:%d\n"
 		"flags:%d easy_wakeup_gesture:%d\n", __func__,
 		pdata->irq_gpio, pdata->rst_gpio,
@@ -668,7 +668,7 @@ int cyttsp5_devtree_create_and_get_pdata(struct device *adap_dev)
 
 		rc = of_property_read_string(core_node, "name", &name);
 		if (!rc)
-			pr_debug("%s: name:%s\n", __func__, name);
+			printk(KERN_ERR "%s: name:%s\n", __func__, name);
 
 		pdata->core_pdata = create_and_get_core_pdata(core_node);
 		if (IS_ERR(pdata->core_pdata)) {
@@ -711,7 +711,7 @@ int cyttsp5_devtree_create_and_get_pdata(struct device *adap_dev)
 		pdata->loader_pdata = &_cyttsp5_loader_platform_data;
 	}
 
-	pr_debug("%s: %d child node(s) found\n", __func__, count);
+	printk(KERN_ERR "%s: %d child node(s) found\n", __func__, count);
 
 	return rc;
 }

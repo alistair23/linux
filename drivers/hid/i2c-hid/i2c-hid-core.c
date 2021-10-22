@@ -63,8 +63,7 @@ MODULE_PARM_DESC(debug, "print a lot of debug information");
 
 #define i2c_hid_dbg(ihid, fmt, arg...)					  \
 do {									  \
-	if (debug)							  \
-		dev_printk(KERN_DEBUG, &(ihid)->client->dev, fmt, ##arg); \
+		dev_printk(KERN_ERR, &(ihid)->client->dev, fmt, ##arg); \
 } while (0)
 
 struct i2c_hid_desc {
@@ -239,6 +238,8 @@ static int __i2c_hid_command(struct i2c_client *client,
 	length += args_len;
 
 	i2c_hid_dbg(ihid, "%s: cmd=%*ph\n", __func__, length, cmd->data);
+
+	printk(KERN_ERR "i2c-hid: Write %*ph operation to address 0x%x", length, cmd->data, client->addr);
 
 	msg[0].addr = client->addr;
 	msg[0].flags = client->flags & I2C_M_TEN;
@@ -865,22 +866,47 @@ static int i2c_hid_fetch_hid_descriptor(struct i2c_hid *ihid)
 		}
 	}
 
+	i2c_hid_dbg(ihid, "HID Descriptor: %*ph\n", dsize, ihid->hdesc_buffer);
+
+	dev_err(&client->dev,
+			"Before 0x%04hx : 0x%04hx : 0x%04hx : 0x%04hx : 0x%04hx\n",
+			le16_to_cpu(hdesc->wHIDDescLength),
+			le16_to_cpu(hdesc->bcdVersion),
+			le16_to_cpu(hdesc->wReportDescLength),
+			le16_to_cpu(hdesc->wReportDescRegister),
+			le16_to_cpu(hdesc->wInputRegister)
+			);
+
 	/* Validate the length of HID descriptor, the 4 first bytes:
 	 * bytes 0-1 -> length
 	 * bytes 2-3 -> bcdVersion (has to be 1.00) */
 	/* check bcdVersion == 1.0 */
 	if (le16_to_cpu(hdesc->bcdVersion) != 0x0100) {
+		memmove(&hdesc->bcdVersion, &hdesc->wReportDescLength, sizeof(struct i2c_hid_desc) - 2);
+		hdesc->wHIDDescLength = (hdesc->wHIDDescLength & 0xFF) - 2;
+
 		dev_err(&client->dev,
-			"unexpected HID descriptor bcdVersion (0x%04hx)\n",
-			le16_to_cpu(hdesc->bcdVersion));
-		return -ENODEV;
+			"After 0x%04hx : 0x%04hx : 0x%04hx : 0x%04hx : 0x%04hx\n",
+			le16_to_cpu(hdesc->wHIDDescLength),
+			le16_to_cpu(hdesc->bcdVersion),
+			le16_to_cpu(hdesc->wReportDescLength),
+			le16_to_cpu(hdesc->wReportDescRegister),
+			le16_to_cpu(hdesc->wInputRegister)
+			);
+
+		if (le16_to_cpu(hdesc->bcdVersion) != 0x0100) {
+			dev_err(&client->dev,
+				"unexpected HID descriptor bcdVersion (0x%04hx)\n",
+				le16_to_cpu(hdesc->bcdVersion));
+			return -ENODEV;
+		}
 	}
 
 	/* Descriptor length should be 30 bytes as per the specification */
 	dsize = le16_to_cpu(hdesc->wHIDDescLength);
 	if (dsize != sizeof(struct i2c_hid_desc)) {
-		dev_err(&client->dev, "weird size of HID descriptor (%u)\n",
-			dsize);
+		dev_err(&client->dev, "weird size of HID descriptor (%u) != %u\n",
+			dsize, sizeof(struct i2c_hid_desc));
 		return -ENODEV;
 	}
 	i2c_hid_dbg(ihid, "HID Descriptor: %*ph\n", dsize, ihid->hdesc_buffer);

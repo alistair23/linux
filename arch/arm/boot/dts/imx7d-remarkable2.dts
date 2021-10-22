@@ -378,17 +378,17 @@
 	pinctrl-0 = <&pinctrl_i2c3>;
 	status = "okay";
 
-	tsc@24 {
-		status = "okay";
-		compatible = "cy,cyttsp5_i2c_adapter";
+	cyttsp5@24 {
+		compatible = "hid-over-i2c-cyttsp5";
 		reg = <0x24>;
-		interrupt-parent = <&gpio1>;
-		interrupts = <14 2>;
-		cy,adapter_id = "cyttsp5_i2c_adapter";
-		pinctrl-names = "default", "sleep";
+		hid-descr-addr = <0x04>;
+		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_touch>;
-		pinctrl-1 = <&pinctrl_touch>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <14 IRQ_TYPE_EDGE_FALLING>;
 		vdd-supply = <&reg_touch>;
+
+		cy,adapter_id = "cyttsp5_i2c_adapter";
 
 		cy,core {
 			cy,name = "cyttsp5_core";
