@@ -5672,16 +5672,6 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 	dev_set_drvdata(dev, cd);
 	cyttsp5_add_core(dev);
 
-	cd->vdd = regulator_get(cd->dev, "vdd");
-	if (IS_ERR(cd->vdd)) {
-		rc = PTR_ERR(cd->vdd);
-		goto error_vdd_get;
-	}
-
-	rc = regulator_enable(cd->vdd);
-	if (rc)
-		goto error_vdd_enable;
-
 	/* Call platform init function */
 	if (cd->cpdata->init) {
 		dev_dbg(cd->dev, "%s: Init HW\n", __func__);
@@ -5711,18 +5701,6 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 		goto error_setup_irq;
 	}
 
-	dev_dbg(dev, "%s: add sysfs interfaces\n", __func__);
-	rc = add_sysfs_interfaces(dev);
-	if (rc < 0) {
-		dev_err(dev, "%s: Error, fail sysfs init\n", __func__);
-		goto error_attr_create;
-	}
-
-#ifdef TTHE_TUNER_SUPPORT
-	mutex_init(&cd->tthe_lock);
-	cd->tthe_debugfs = debugfs_create_file(CYTTSP5_TTHE_TUNER_FILE_NAME,
-			0644, NULL, cd, &tthe_debugfs_fops);
-#endif
 	rc = device_init_wakeup(dev, 1);
 	if (rc < 0)
 		dev_err(dev, "%s: Error, device_init_wakeup rc:%d\n",
@@ -5805,10 +5783,6 @@ error_setup_irq:
 error_detect:
 	if (cd->cpdata->init)
 		cd->cpdata->init(cd->cpdata, 0, dev);
-	regulator_disable(cd->vdd);
-error_vdd_enable:
-	regulator_put(cd->vdd);
-error_vdd_get:
 	cyttsp5_del_core(dev);
 	dev_set_drvdata(dev, NULL);
 	kfree(cd);
@@ -5865,8 +5839,6 @@ int cyttsp5_release(struct cyttsp5_core_data *cd)
 	free_irq(cd->irq, cd);
 	if (cd->cpdata->init)
 		cd->cpdata->init(cd->cpdata, 0, dev);
-	regulator_disable(cd->vdd);
-	regulator_put(cd->vdd);
 	dev_set_drvdata(dev, NULL);
 	cyttsp5_del_core(dev);
 	cyttsp5_free_si_ptrs(cd);

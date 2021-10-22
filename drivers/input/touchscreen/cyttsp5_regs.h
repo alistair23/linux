@@ -972,7 +972,6 @@ struct cyttsp5_core_data {
 	u8 tthe_exit;
 #endif
 	u8 pr_buf[CY_MAX_PRBUF_SIZE];
-	struct regulator *vdd;
 };
 struct gd_sensor {
 	int32_t cm_min;
