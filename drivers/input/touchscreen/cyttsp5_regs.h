@@ -946,8 +946,6 @@ struct cyttsp5_core_data {
 	struct cyttsp5_sysinfo sysinfo;
 	void *exclusive_dev;
 	int exclusive_waits;
-	struct work_struct watchdog_work;
-	struct timer_list watchdog_timer;
 	u16 startup_retry_count;
 	struct cyttsp5_hid_core hid_core;
 	int hid_cmd_state;

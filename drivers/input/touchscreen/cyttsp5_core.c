@@ -3492,94 +3492,12 @@ static void call_atten_cb(struct cyttsp5_core_data *cd,
 	spin_unlock(&cd->spinlock);
 }
 
-static void cyttsp5_start_wd_timer(struct cyttsp5_core_data *cd)
-{
-	if (!CY_WATCHDOG_TIMEOUT)
-		return;
-
-	mod_timer(&cd->watchdog_timer, jiffies +
-			msecs_to_jiffies(CY_WATCHDOG_TIMEOUT));
-}
-
-static void cyttsp5_stop_wd_timer(struct cyttsp5_core_data *cd)
-{
-	if (!CY_WATCHDOG_TIMEOUT)
-		return;
-
-	/*
-	 * Ensure we wait until the watchdog timer
-	 * running on a different CPU finishes
-	 */
-	del_timer_sync(&cd->watchdog_timer);
-	cancel_work_sync(&cd->watchdog_work);
-	del_timer_sync(&cd->watchdog_timer);
-}
-
 static int start_fw_upgrade(void *data)
 {
 	struct cyttsp5_core_data *cd = (struct cyttsp5_core_data *)data;
 
 	call_atten_cb(cd, CY_ATTEN_LOADER, 0);
 	return 0;
-}
-
-static void cyttsp5_watchdog_work(struct work_struct *work)
-{
-	struct cyttsp5_core_data *cd =
-			container_of(work, struct cyttsp5_core_data,
-					watchdog_work);
-	int rc;
-	 /*fix CDT207254
-	*if found the current sleep_state is SS_SLEEPING
-	*then no need to request_exclusive, directly return
-	*/
-	if (cd->sleep_state == SS_SLEEPING)
-		return;
-
-	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
-	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
-				__func__, cd->exclusive_dev, cd->dev);
-		goto queue_startup;
-	}
-
-	rc = cyttsp5_hid_output_null_(cd);
-
-	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
-
-queue_startup:
-	if (rc) {
-		dev_err(cd->dev,
-			"%s: failed to access device in watchdog timer r=%d\n",
-			__func__, rc);
-
-		/* Already tried FW upgrade because of watchdog but failed */
-		if (cd->startup_retry_count > CY_WATCHDOG_RETRY_COUNT)
-			return;
-
-		if (cd->startup_retry_count++ < CY_WATCHDOG_RETRY_COUNT)
-			cyttsp5_queue_startup(cd);
-		else
-			kthread_run(start_fw_upgrade, cd, "cyttp5_loader");
-
-		return;
-	}
-
-	cyttsp5_start_wd_timer(cd);
-}
-
-static void cyttsp5_watchdog_timer(struct timer_list *t)
-{
-	struct cyttsp5_core_data *cd = from_timer(cd, t, watchdog_timer);
-
-	if (!cd)
-		return;
-
-	dev_err(cd->dev, "%s: Watchdog timer triggered\n", __func__);
-
-	if (!work_pending(&cd->watchdog_work))
-		schedule_work(&cd->watchdog_work);
 }
 
 static int cyttsp5_put_device_into_easy_wakeup_(struct cyttsp5_core_data *cd)
@@ -3649,11 +3567,6 @@ static int cyttsp5_core_sleep_(struct cyttsp5_core_data *cd)
 		return 1;
 	}
 	mutex_unlock(&cd->system_lock);
-
-	/* Ensure watchdog and startup works stopped */
-	cyttsp5_stop_wd_timer(cd);
-	cancel_work_sync(&cd->startup_work);
-	cyttsp5_stop_wd_timer(cd);
 
 	if (cd->cpdata->flags & CY_CORE_FLAG_POWEROFF_ON_SLEEP)
 		rc = cyttsp5_core_poweroff_device_(cd);
@@ -3933,10 +3846,6 @@ static int cyttsp5_parse_input(struct cyttsp5_core_data *cd)
 		return 0;
 	}
 
-	/* update watchdog expire time */
-	mod_timer_pending(&cd->watchdog_timer, jiffies +
-			msecs_to_jiffies(CY_WATCHDOG_TIMEOUT));
-
 	if (report_id != cd->sysinfo.desc.tch_report_id
 			&& report_id != cd->sysinfo.desc.btn_report_id
 			&& report_id != HID_SENSOR_DATA_REPORT_ID
@@ -4213,22 +4122,6 @@ static struct cyttsp5_loader_platform_data *_cyttsp5_request_loader_pdata(
 	return cd->pdata->loader_pdata;
 }
 
-static int _cyttsp5_request_start_wd(struct device *dev)
-{
-	struct cyttsp5_core_data *cd = dev_get_drvdata(dev);
-
-	cyttsp5_start_wd_timer(cd);
-	return 0;
-}
-
-static int _cyttsp5_request_stop_wd(struct device *dev)
-{
-	struct cyttsp5_core_data *cd = dev_get_drvdata(dev);
-
-	cyttsp5_stop_wd_timer(cd);
-	return 0;
-}
-
 static int cyttsp5_core_wake_device_from_deep_sleep_(
 		struct cyttsp5_core_data *cd)
 {
@@ -4385,7 +4278,6 @@ static int cyttsp5_core_wake_(struct cyttsp5_core_data *cd)
 	cd->sleep_state = SS_SLEEP_OFF;
 	mutex_unlock(&cd->system_lock);
 
-	cyttsp5_start_wd_timer(cd);
 	return rc;
 }
 
@@ -4485,8 +4377,6 @@ static int cyttsp5_startup_(struct cyttsp5_core_data *cd, bool reset)
 #endif
 
 	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
-
-	cyttsp5_stop_wd_timer(cd);
 
 reset:
 	if (retry != CY_CORE_STARTUP_RETRY_COUNT)
@@ -4640,8 +4530,6 @@ reset:
 exit:
 	if (!rc)
 		cd->startup_retry_count = 0;
-
-	cyttsp5_start_wd_timer(cd);
 
 	if (!detected)
 		rc = -ENODEV;
@@ -4981,17 +4869,6 @@ static ssize_t cyttsp5_drv_debug_store(struct device *dev,
 		goto cyttsp5_drv_debug_store_exit;
 	}
 
-	/* Start watchdog timer command */
-	if (value == CY_DBG_HID_START_WD) {
-		dev_info(dev, "%s: start watchdog (cd=%p)\n", __func__, cd);
-		wd_disabled = 0;
-		cyttsp5_start_wd_timer(cd);
-		goto cyttsp5_drv_debug_store_exit;
-	}
-
-	/* Stop watchdog timer temporarily */
-	cyttsp5_stop_wd_timer(cd);
-
 	if (value == CY_DBG_HID_STOP_WD) {
 		dev_info(dev, "%s: stop watchdog (cd=%p)\n", __func__, cd);
 		wd_disabled = 1;
@@ -5098,10 +4975,6 @@ static ssize_t cyttsp5_drv_debug_store(struct device *dev,
 	default:
 		dev_err(dev, "%s: Invalid value\n", __func__);
 	}
-
-	/* Enable watchdog timer */
-	if (!wd_disabled)
-		cyttsp5_start_wd_timer(cd);
 
 cyttsp5_drv_debug_store_exit:
 	return size;
@@ -5414,8 +5287,6 @@ static struct cyttsp5_core_commands _cyttsp5_core_commands = {
 	.request_restart = _cyttsp5_request_restart,
 	.request_sysinfo = _cyttsp5_request_sysinfo,
 	.request_loader_pdata = _cyttsp5_request_loader_pdata,
-	.request_stop_wd = _cyttsp5_request_stop_wd,
-	.request_start_wd = _cyttsp5_request_start_wd,
 	.request_get_hid_desc = _cyttsp5_request_get_hid_desc,
 	.request_get_mode = _cyttsp5_request_get_mode,
 #ifdef TTHE_TUNER_SUPPORT
@@ -5783,7 +5654,6 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 
 	/* Initialize works */
 	INIT_WORK(&cd->startup_work, cyttsp5_startup_work_function);
-	INIT_WORK(&cd->watchdog_work, cyttsp5_watchdog_work);
 
 	/* Initialize HID specific data */
 	cd->hid_core.hid_vendor_id = (cd->cpdata->vendor_id) ?
@@ -5835,14 +5705,11 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 		}
 	}
 
-	/* Setup watchdog timer */
-	timer_setup(&cd->watchdog_timer, cyttsp5_watchdog_timer, 0);
-
-	// rc = cyttsp5_setup_irq_gpio(cd);
-	// if (rc < 0) {
-	// 	dev_err(dev, "%s: Error, could not setup IRQ\n", __func__);
-	// 	goto error_setup_irq;
-	// }
+	rc = cyttsp5_setup_irq_gpio(cd);
+	if (rc < 0) {
+		dev_err(dev, "%s: Error, could not setup IRQ\n", __func__);
+		goto error_setup_irq;
+	}
 
 	dev_dbg(dev, "%s: add sysfs interfaces\n", __func__);
 	rc = add_sysfs_interfaces(dev);
@@ -5930,12 +5797,10 @@ error_startup:
 #endif
 	device_init_wakeup(dev, 0);
 	cancel_work_sync(&cd->startup_work);
-	cyttsp5_stop_wd_timer(cd);
 	cyttsp5_free_si_ptrs(cd);
 	remove_sysfs_interfaces(dev);
 error_attr_create:
 	free_irq(cd->irq, cd);
-	del_timer(&cd->watchdog_timer);
 error_setup_irq:
 error_detect:
 	if (cd->cpdata->init)
@@ -5983,8 +5848,6 @@ int cyttsp5_release(struct cyttsp5_core_data *cd)
 	pm_runtime_disable(dev);
 
 	cancel_work_sync(&cd->startup_work);
-
-	cyttsp5_stop_wd_timer(cd);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 16, 0))
 	device_wakeup_disable(dev);
