@@ -1207,8 +1207,6 @@ int hid_pidff_init(struct hid_device *hid);
 
 #define dbg_hid(fmt, ...)						\
 do {									\
-	if (hid_debug)							\
-		printk(KERN_DEBUG "%s: " fmt, __FILE__, ##__VA_ARGS__);	\
 } while (0)
 
 #define hid_err(hid, fmt, ...)				\

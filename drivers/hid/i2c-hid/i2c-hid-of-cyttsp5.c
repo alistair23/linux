@@ -93,6 +93,8 @@ static int cyttsp5_i2c_read_default_nosize(struct device *dev, u8 *buf, u32 max)
 	if (!buf)
 		return -EINVAL;
 
+	// printk(KERN_ERR "cyttsp5: Read %d from address 0x%x", max, client->addr);
+
 	msgs[0].addr = client->addr;
 	msgs[0].flags = (client->flags & I2C_M_TEN) | I2C_M_RD;
 	msgs[0].len = 2;
@@ -126,7 +128,7 @@ static int cyttsp5_i2c_write_read_specific(struct device *dev, u8 write_len,
 	if (!write_buf || !write_len)
 		return -EINVAL;
 
-	printk(KERN_ERR "cyttsp5: Write %*ph operation to address 0x%x", write_len, write_buf, client->addr);
+	// printk(KERN_ERR "cyttsp5: Write %*ph operation to address 0x%x", write_len, write_buf, client->addr);
 
 	msgs[0].addr = client->addr;
 	msgs[0].flags = client->flags & I2C_M_TEN;

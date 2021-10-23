@@ -2388,8 +2388,12 @@ int hid_add_device(struct hid_device *hdev)
 	static atomic_t id = ATOMIC_INIT(0);
 	int ret;
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	if (WARN_ON(hdev->status & HID_STAT_ADDED))
 		return -EBUSY;
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	hdev->quirks = hid_lookup_quirk(hdev);
 
@@ -2398,6 +2402,8 @@ int hid_add_device(struct hid_device *hdev)
 	if (hid_ignore(hdev))
 		return -ENODEV;
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	/*
 	 * Check for the mandatory transport channel.
 	 */
@@ -2405,6 +2411,8 @@ int hid_add_device(struct hid_device *hdev)
 		hid_err(hdev, "transport driver missing .raw_request()\n");
 		return -EINVAL;
 	 }
+
+	 printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	/*
 	 * Read the device report descriptor once and use as template
@@ -2415,6 +2423,8 @@ int hid_add_device(struct hid_device *hdev)
 		return ret;
 	if (!hdev->dev_rdesc)
 		return -ENODEV;
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	/*
 	 * Scan generic devices for group information
@@ -2428,17 +2438,24 @@ int hid_add_device(struct hid_device *hdev)
 			hid_warn(hdev, "bad device descriptor (%d)\n", ret);
 	}
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	/* XXX hack, any other cleaner solution after the driver core
 	 * is converted to allow more than 20 bytes as the device name? */
 	dev_set_name(&hdev->dev, "%04X:%04X:%04X.%04X", hdev->bus,
 		     hdev->vendor, hdev->product, atomic_inc_return(&id));
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	hid_debug_register(hdev, dev_name(&hdev->dev));
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 	ret = device_add(&hdev->dev);
 	if (!ret)
 		hdev->status |= HID_STAT_ADDED;
 	else
 		hid_debug_unregister(hdev);
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	return ret;
 }

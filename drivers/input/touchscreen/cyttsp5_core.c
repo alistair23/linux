@@ -149,10 +149,10 @@ void cyttsp5_pr_buf(struct device *dev, u8 *dptr, int size,
 		scnprintf(pr_buf + k, CY_MAX_PRBUF_SIZE, fmt, dptr[i]);
 
 	if (size)
-		dev_err(dev, "%s:  %s[0..%d]=%s%s\n", __func__, data_name,
+		dev_dbg(dev, "%s:  %s[0..%d]=%s%s\n", __func__, data_name,
 			size - 1, pr_buf, size <= max ? "" : CY_PR_TRUNCATED);
 	else
-		dev_err(dev, "%s:  %s[]\n", __func__, data_name);
+		dev_dbg(dev, "%s:  %s[]\n", __func__, data_name);
 }
 EXPORT_SYMBOL_GPL(cyttsp5_pr_buf);
 #endif
@@ -317,7 +317,7 @@ static int cyttsp5_add_parameter(struct cyttsp5_core_data *cd,
 		if (param->id == param_id) {
 			/* Update parameter */
 			param->value = param_value;
-			dev_err(cd->dev, "%s: Update parameter id:%d value:%d size:%d\n",
+			dev_dbg(cd->dev, "%s: Update parameter id:%d value:%d size:%d\n",
 				 __func__, param_id, param_value, param_size);
 			goto exit_unlock;
 		}
@@ -332,7 +332,7 @@ static int cyttsp5_add_parameter(struct cyttsp5_core_data *cd,
 	param_new->value = param_value;
 	param_new->size = param_size;
 
-	dev_err(cd->dev, "%s: Add parameter id:%d value:%d size:%d\n",
+	dev_dbg(cd->dev, "%s: Add parameter id:%d value:%d size:%d\n",
 		__func__, param_id, param_value, param_size);
 
 	spin_lock(&cd->spinlock);
@@ -361,7 +361,7 @@ wait:
 	if (with_timeout) {
 		t = wait_event_timeout(cd->wait_q, !cd->exclusive_dev, t);
 		if (IS_TMO(t)) {
-			dev_err(cd->dev, "%s: tmo waiting exclusive access\n",
+			dev_dbg(cd->dev, "%s: tmo waiting exclusive access\n",
 				__func__);
 			return -ETIME;
 		}
@@ -375,7 +375,7 @@ wait:
 	cd->exclusive_waits--;
 exit:
 	mutex_unlock(&cd->system_lock);
-	dev_err(cd->dev, "%s: request_exclusive ok=%p\n",
+	dev_dbg(cd->dev, "%s: request_exclusive ok=%p\n",
 		__func__, ownptr);
 
 	return 0;
@@ -386,7 +386,7 @@ static int release_exclusive_(struct cyttsp5_core_data *cd, void *ownptr)
 	if (cd->exclusive_dev != ownptr)
 		return -EINVAL;
 
-	dev_err(cd->dev, "%s: exclusive_dev %p freed\n",
+	dev_dbg(cd->dev, "%s: exclusive_dev %p freed\n",
 		__func__, cd->exclusive_dev);
 	cd->exclusive_dev = NULL;
 	wake_up(&cd->wait_q);
@@ -464,7 +464,7 @@ static int cyttsp5_hid_exec_cmd_(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_adap_write_read_specific(cd, cmd_length, cmd,
 			hid_cmd->read_buf);
 	if (rc)
-		dev_err(cd->dev, "%s: Fail cyttsp5_adap_transfer\n", __func__);
+		dev_dbg(cd->dev, "%s: Fail cyttsp5_adap_transfer\n", __func__);
 
 	kfree(cmd);
 	return rc;
@@ -508,7 +508,7 @@ static int cyttsp5_hid_exec_cmd_and_wait_(struct cyttsp5_core_data *cd,
 	t = wait_event_timeout(cd->wait_q, (*cmd_state == 0),
 			msecs_to_jiffies(timeout_ms));
 	if (IS_TMO(t)) {
-		dev_err(cd->dev, "%s: HID output cmd execution timed out\n",
+		dev_dbg(cd->dev, "%s: HID output cmd execution timed out\n",
 			__func__);
 		rc = -ETIME;
 		goto error;
@@ -543,7 +543,7 @@ static int cyttsp5_hid_cmd_reset(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -551,7 +551,7 @@ static int cyttsp5_hid_cmd_reset(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_cmd_reset_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -569,7 +569,7 @@ static int cyttsp5_hid_cmd_set_power_(struct cyttsp5_core_data *cd,
 
 	rc =  cyttsp5_hid_exec_cmd_and_wait_(cd, &hid_cmd);
 	if (rc) {
-		dev_err(cd->dev, "%s: Failed to set power to state:%d\n",
+		dev_dbg(cd->dev, "%s: Failed to set power to state:%d\n",
 				__func__, power_state);
 	       return rc;
 	}
@@ -590,7 +590,7 @@ static int cyttsp5_hid_cmd_set_power(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -598,7 +598,7 @@ static int cyttsp5_hid_cmd_set_power(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_cmd_set_power_(cd, power_state);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -649,19 +649,19 @@ static int cyttsp5_hid_output_validate_bl_response(
 
 	if (cd->response_buf[HID_OUTPUT_RESPONSE_REPORT_OFFSET]
 			!= HID_BL_RESPONSE_REPORT_ID) {
-		dev_err(cd->dev, "%s: HID output response, wrong report_id\n",
+		dev_dbg(cd->dev, "%s: HID output response, wrong report_id\n",
 			__func__);
 		return -EPROTO;
 	}
 
 	if (cd->response_buf[4] != HID_OUTPUT_BL_SOP) {
-		dev_err(cd->dev, "%s: HID output response, wrong SOP\n",
+		dev_dbg(cd->dev, "%s: HID output response, wrong SOP\n",
 			__func__);
 		return -EPROTO;
 	}
 
 	if (cd->response_buf[size - 1] != HID_OUTPUT_BL_EOP) {
-		dev_err(cd->dev, "%s: HID output response, wrong EOP\n",
+		dev_dbg(cd->dev, "%s: HID output response, wrong EOP\n",
 			__func__);
 		return -EPROTO;
 	}
@@ -669,14 +669,14 @@ static int cyttsp5_hid_output_validate_bl_response(
 	crc = _cyttsp5_compute_crc(&cd->response_buf[4], size - 7);
 	if (cd->response_buf[size - 3] != LOW_BYTE(crc)
 			|| cd->response_buf[size - 2] != HI_BYTE(crc)) {
-		dev_err(cd->dev, "%s: HID output response, wrong CRC 0x%X\n",
+		dev_dbg(cd->dev, "%s: HID output response, wrong CRC 0x%X\n",
 			__func__, crc);
 		return -EPROTO;
 	}
 
 	status = cd->response_buf[5];
 	if (status) {
-		dev_err(cd->dev, "%s: HID output response, ERROR:%d\n",
+		dev_dbg(cd->dev, "%s: HID output response, ERROR:%d\n",
 			__func__, status);
 		return -EPROTO;
 	}
@@ -698,7 +698,7 @@ static int cyttsp5_hid_output_validate_app_response(
 
 	if (cd->response_buf[HID_OUTPUT_RESPONSE_REPORT_OFFSET]
 			!= HID_APP_RESPONSE_REPORT_ID) {
-		dev_err(cd->dev, "%s: HID output response, wrong report_id\n",
+		dev_dbg(cd->dev, "%s: HID output response, wrong report_id\n",
 			__func__);
 		return -EPROTO;
 	}
@@ -706,7 +706,7 @@ static int cyttsp5_hid_output_validate_app_response(
 	command_code = cd->response_buf[HID_OUTPUT_RESPONSE_CMD_OFFSET]
 		& HID_OUTPUT_RESPONSE_CMD_MASK;
 	if (command_code != hid_output->command_code) {
-		dev_err(cd->dev,
+		dev_dbg(cd->dev,
 			"%s: HID output response, wrong command_code:%X\n",
 			__func__, command_code);
 		return -EPROTO;
@@ -749,7 +749,7 @@ static void cyttsp5_check_set_parameter(struct cyttsp5_core_data *cd,
 	param_id = param_buf[0];
 	param_size = param_buf[1];
 	if (param_size > 4) {
-		dev_err(cd->dev, "%s: Invalid parameter size\n", __func__);
+		dev_dbg(cd->dev, "%s: Invalid parameter size\n", __func__);
 		return;
 	}
 
@@ -763,7 +763,7 @@ static void cyttsp5_check_set_parameter(struct cyttsp5_core_data *cd,
 				HID_OUTPUT_SET_PARAM
 			|| cd->response_buf[5] != param_id
 			|| cd->response_buf[6] != param_size) {
-		dev_err(cd->dev, "%s: Set Parameter command not successful\n",
+		dev_dbg(cd->dev, "%s: Set Parameter command not successful\n",
 			__func__);
 		return;
 	}
@@ -798,7 +798,7 @@ static int cyttsp5_hid_send_output_user_(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_adap_write_read_specific(cd, hid_output->length,
 			hid_output->write_buf, NULL);
 	if (rc)
-		dev_err(cd->dev, "%s: Fail cyttsp5_adap_transfer\n", __func__);
+		dev_dbg(cd->dev, "%s: Fail cyttsp5_adap_transfer\n", __func__);
 
 	return rc;
 }
@@ -820,7 +820,7 @@ static int cyttsp5_hid_send_output_user_and_wait_(struct cyttsp5_core_data *cd,
 	t = wait_event_timeout(cd->wait_q, (cd->hid_cmd_state == 0),
 			msecs_to_jiffies(CY_HID_OUTPUT_USER_TIMEOUT));
 	if (IS_TMO(t)) {
-		dev_err(cd->dev, "%s: HID output cmd execution timed out\n",
+		dev_dbg(cd->dev, "%s: HID output cmd execution timed out\n",
 			__func__);
 		rc = -ETIME;
 		goto error;
@@ -909,7 +909,7 @@ static int cyttsp5_hid_send_output_(struct cyttsp5_core_data *cd,
 	cyttsp5_pr_buf(cd->dev, cmd, length + 2, "command");
 	rc = cyttsp5_adap_write_read_specific(cd, length + 2, cmd, NULL);
 	if (rc)
-		dev_err(cd->dev, "%s: Fail cyttsp5_adap_transfer\n", __func__);
+		dev_dbg(cd->dev, "%s: Fail cyttsp5_adap_transfer\n", __func__);
 
 	if (cmd_allocated)
 		kfree(cmd);
@@ -943,7 +943,7 @@ static int cyttsp5_hid_send_output_and_wait_(struct cyttsp5_core_data *cd,
 	t = wait_event_timeout(cd->wait_q, (cd->hid_cmd_state == 0),
 			msecs_to_jiffies(timeout_ms));
 	if (IS_TMO(t)) {
-		dev_err(cd->dev, "%s: HID output cmd execution timed out\n",
+		dev_dbg(cd->dev, "%s: HID output cmd execution timed out\n",
 			__func__);
 		rc = -ETIME;
 		goto error;
@@ -984,7 +984,7 @@ static int cyttsp5_hid_output_null(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -992,7 +992,7 @@ static int cyttsp5_hid_output_null(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_null_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1014,7 +1014,7 @@ static int cyttsp5_hid_output_start_bootloader(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1022,7 +1022,7 @@ static int cyttsp5_hid_output_start_bootloader(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_start_bootloader_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1135,7 +1135,7 @@ static int cyttsp5_si_get_btn_data(struct cyttsp5_core_data *cd)
 		& HID_SYSINFO_BTN_MASK;
 	size_t btn_keys_size;
 
-	dev_err(cd->dev, "%s: get btn data\n", __func__);
+	dev_dbg(cd->dev, "%s: get btn data\n", __func__);
 
 	for (i = 0; i < HID_SYSINFO_MAX_BTN; i++) {
 		if (btns & (1 << i))
@@ -1184,64 +1184,64 @@ static void cyttsp5_si_put_log_data(struct cyttsp5_core_data *cd)
 	struct cyttsp5_sensing_conf_data *scd = &si->sensing_conf_data;
 	int i;
 
-	dev_err(cd->dev, "%s: pip_ver_major =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: pip_ver_major =0x%02X (%d)\n", __func__,
 		cydata->pip_ver_major, cydata->pip_ver_major);
-	dev_err(cd->dev, "%s: pip_ver_minor =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: pip_ver_minor =0x%02X (%d)\n", __func__,
 		cydata->pip_ver_minor, cydata->pip_ver_minor);
-	dev_err(cd->dev, "%s: fw_pid =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: fw_pid =0x%04X (%d)\n", __func__,
 		cydata->fw_pid, cydata->fw_pid);
-	dev_err(cd->dev, "%s: fw_ver_major =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: fw_ver_major =0x%02X (%d)\n", __func__,
 		cydata->fw_ver_major, cydata->fw_ver_major);
-	dev_err(cd->dev, "%s: fw_ver_minor =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: fw_ver_minor =0x%02X (%d)\n", __func__,
 		cydata->fw_ver_minor, cydata->fw_ver_minor);
-	dev_err(cd->dev, "%s: revctrl =0x%08X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: revctrl =0x%08X (%d)\n", __func__,
 		cydata->revctrl, cydata->revctrl);
-	dev_err(cd->dev, "%s: fw_ver_conf =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: fw_ver_conf =0x%04X (%d)\n", __func__,
 		cydata->fw_ver_conf, cydata->fw_ver_conf);
-	dev_err(cd->dev, "%s: bl_ver_major =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: bl_ver_major =0x%02X (%d)\n", __func__,
 		cydata->bl_ver_major, cydata->bl_ver_major);
-	dev_err(cd->dev, "%s: bl_ver_minor =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: bl_ver_minor =0x%02X (%d)\n", __func__,
 		cydata->bl_ver_minor, cydata->bl_ver_minor);
-	dev_err(cd->dev, "%s: jtag_id_h =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: jtag_id_h =0x%04X (%d)\n", __func__,
 		cydata->jtag_id_h, cydata->jtag_id_h);
-	dev_err(cd->dev, "%s: jtag_id_l =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: jtag_id_l =0x%04X (%d)\n", __func__,
 		cydata->jtag_id_l, cydata->jtag_id_l);
 	for (i = 0; i < CY_NUM_MFGID; i++)
-		dev_err(cd->dev, "%s: mfg_id[%d] =0x%02X (%d)\n", __func__, i,
+		dev_dbg(cd->dev, "%s: mfg_id[%d] =0x%02X (%d)\n", __func__, i,
 			cydata->mfg_id[i], cydata->mfg_id[i]);
-	dev_err(cd->dev, "%s: post_code =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: post_code =0x%04X (%d)\n", __func__,
 		cydata->post_code, cydata->post_code);
 
-	dev_err(cd->dev, "%s: electrodes_x =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: electrodes_x =0x%02X (%d)\n", __func__,
 		scd->electrodes_x, scd->electrodes_x);
-	dev_err(cd->dev, "%s: electrodes_y =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: electrodes_y =0x%02X (%d)\n", __func__,
 		scd->electrodes_y, scd->electrodes_y);
-	dev_err(cd->dev, "%s: len_x =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: len_x =0x%04X (%d)\n", __func__,
 		scd->len_x, scd->len_x);
-	dev_err(cd->dev, "%s: len_y =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: len_y =0x%04X (%d)\n", __func__,
 		scd->len_y, scd->len_y);
-	dev_err(cd->dev, "%s: res_x =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: res_x =0x%04X (%d)\n", __func__,
 		scd->res_x, scd->res_x);
-	dev_err(cd->dev, "%s: res_y =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: res_y =0x%04X (%d)\n", __func__,
 		scd->res_y, scd->res_y);
-	dev_err(cd->dev, "%s: max_z =0x%04X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: max_z =0x%04X (%d)\n", __func__,
 		scd->max_z, scd->max_z);
-	dev_err(cd->dev, "%s: origin_x =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: origin_x =0x%02X (%d)\n", __func__,
 		scd->origin_x, scd->origin_x);
-	dev_err(cd->dev, "%s: origin_y =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: origin_y =0x%02X (%d)\n", __func__,
 		scd->origin_y, scd->origin_y);
-	dev_err(cd->dev, "%s: panel_id =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: panel_id =0x%02X (%d)\n", __func__,
 		scd->panel_id, scd->panel_id);
-	dev_err(cd->dev, "%s: btn =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: btn =0x%02X (%d)\n", __func__,
 		scd->btn, scd->btn);
-	dev_err(cd->dev, "%s: scan_mode =0x%02X (%d)\n", __func__,
+	dev_dbg(cd->dev, "%s: scan_mode =0x%02X (%d)\n", __func__,
 		scd->scan_mode, scd->scan_mode);
-	dev_err(cd->dev, "%s: max_num_of_tch_per_refresh_cycle =0x%02X (%d)\n",
+	dev_dbg(cd->dev, "%s: max_num_of_tch_per_refresh_cycle =0x%02X (%d)\n",
 		__func__, scd->max_tch, scd->max_tch);
 
-	dev_err(cd->dev, "%s: xy_mode =%p\n", __func__,
+	dev_dbg(cd->dev, "%s: xy_mode =%p\n", __func__,
 		si->xy_mode);
-	dev_err(cd->dev, "%s: xy_data =%p\n", __func__,
+	dev_dbg(cd->dev, "%s: xy_data =%p\n", __func__,
 		si->xy_data);
 }
 
@@ -1300,7 +1300,7 @@ static int cyttsp5_hid_output_get_sysinfo(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1308,7 +1308,7 @@ static int cyttsp5_hid_output_get_sysinfo(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_get_sysinfo_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1328,7 +1328,7 @@ static int cyttsp5_hid_output_suspend_scanning(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1336,7 +1336,7 @@ static int cyttsp5_hid_output_suspend_scanning(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_suspend_scanning_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1367,7 +1367,7 @@ static int cyttsp5_hid_output_resume_scanning(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1375,7 +1375,7 @@ static int cyttsp5_hid_output_resume_scanning(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_resume_scanning_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1430,7 +1430,7 @@ static int cyttsp5_hid_output_get_param(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1438,7 +1438,7 @@ static int cyttsp5_hid_output_get_param(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_output_get_param_(cd, param_id, value);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1492,7 +1492,7 @@ static int cyttsp5_hid_output_set_param(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1500,7 +1500,7 @@ static int cyttsp5_hid_output_set_param(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_output_set_param_(cd, param_id, value, size);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1569,7 +1569,7 @@ static int cyttsp5_hid_output_verify_config_block_crc(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1578,7 +1578,7 @@ static int cyttsp5_hid_output_verify_config_block_crc(
 			calculated_crc, stored_crc);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1620,7 +1620,7 @@ static int cyttsp5_hid_output_get_config_row_size(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1628,7 +1628,7 @@ static int cyttsp5_hid_output_get_config_row_size(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_output_get_config_row_size_(cd, row_size);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1776,7 +1776,7 @@ static int cyttsp5_hid_output_write_conf_block(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1785,7 +1785,7 @@ static int cyttsp5_hid_output_write_conf_block(struct cyttsp5_core_data *cd,
 			ebid, write_buf, security_key, actual_write_len);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1875,7 +1875,7 @@ static int cyttsp5_hid_output_get_data_structure(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1885,7 +1885,7 @@ static int cyttsp5_hid_output_get_data_structure(
 			actual_read_len, data);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -1946,7 +1946,7 @@ static int cyttsp5_hid_output_run_selftest(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -1956,7 +1956,7 @@ static int cyttsp5_hid_output_run_selftest(
 			results_available);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2050,7 +2050,7 @@ static int cyttsp5_hid_output_get_selftest_result(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2059,7 +2059,7 @@ static int cyttsp5_hid_output_get_selftest_result(
 			read_length, test_id, status, actual_read_len, data);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2113,7 +2113,7 @@ static int cyttsp5_hid_output_calibrate_idacs(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2121,7 +2121,7 @@ static int cyttsp5_hid_output_calibrate_idacs(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_output_calibrate_idacs_(cd, mode, status);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2170,7 +2170,7 @@ static int cyttsp5_hid_output_initialize_baselines(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2178,7 +2178,7 @@ static int cyttsp5_hid_output_initialize_baselines(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_output_initialize_baselines_(cd, test_id, status);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2210,7 +2210,7 @@ static int cyttsp5_hid_output_exec_panel_scan(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2218,7 +2218,7 @@ static int cyttsp5_hid_output_exec_panel_scan(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_exec_panel_scan_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2296,7 +2296,7 @@ static int cyttsp5_hid_output_retrieve_panel_scan(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2306,7 +2306,7 @@ static int cyttsp5_hid_output_retrieve_panel_scan(
 			actual_read_len, read_buf);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2395,7 +2395,7 @@ static int cyttsp5_get_config_ver_(struct cyttsp5_core_data *cd)
 exit:
 	cyttsp5_hid_output_resume_scanning_(cd);
 error:
-	dev_err(cd->dev, "%s: CONFIG_VER:%04X\n", __func__, config_ver);
+	dev_dbg(cd->dev, "%s: CONFIG_VER:%04X\n", __func__, config_ver);
 	return rc;
 }
 
@@ -2407,7 +2407,7 @@ static int cyttsp5_hid_output_user_cmd(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2416,7 +2416,7 @@ static int cyttsp5_hid_output_user_cmd(struct cyttsp5_core_data *cd,
 			write_len, write_buf, actual_read_len);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2464,7 +2464,7 @@ static int cyttsp5_hid_output_bl_get_information(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2472,7 +2472,7 @@ static int cyttsp5_hid_output_bl_get_information(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_hid_output_bl_get_information_(cd, return_data);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2525,7 +2525,7 @@ static int cyttsp5_hid_output_bl_initiate_bl(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2534,7 +2534,7 @@ static int cyttsp5_hid_output_bl_initiate_bl(struct cyttsp5_core_data *cd,
 			row_size, metadata_row_buf);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2573,7 +2573,7 @@ static int cyttsp5_hid_output_bl_program_and_verify(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2581,7 +2581,7 @@ static int cyttsp5_hid_output_bl_program_and_verify(
 	rc = cyttsp5_hid_output_bl_program_and_verify_(cd, data_len, data_buf);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2624,7 +2624,7 @@ static int cyttsp5_hid_output_bl_verify_app_integrity(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2632,7 +2632,7 @@ static int cyttsp5_hid_output_bl_verify_app_integrity(
 	rc = cyttsp5_hid_output_bl_verify_app_integrity_(cd, result);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2664,7 +2664,7 @@ static int cyttsp5_hid_output_bl_launch_app(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2672,7 +2672,7 @@ static int cyttsp5_hid_output_bl_launch_app(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_hid_output_bl_launch_app_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2698,12 +2698,12 @@ static int cyttsp5_hid_output_bl_get_panel_id_(
 
 	rc = cyttsp5_hid_send_output_and_wait_(cd, &hid_output);
 	if (rc == -EPROTO && cd->response_buf[5] == ERROR_COMMAND) {
-		dev_err(cd->dev, "%s: Get Panel ID command not supported\n",
+		dev_dbg(cd->dev, "%s: Get Panel ID command not supported\n",
 			__func__);
 		*panel_id = PANEL_ID_NOT_ENABLED;
 		return 0;
 	} else if (rc < 0) {
-		dev_err(cd->dev, "%s: Error on Get Panel ID command\n",
+		dev_dbg(cd->dev, "%s: Error on Get Panel ID command\n",
 			__func__);
 		return rc;
 	}
@@ -2719,7 +2719,7 @@ static int cyttsp5_hid_output_bl_get_panel_id(
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2727,7 +2727,7 @@ static int cyttsp5_hid_output_bl_get_panel_id(
 	rc = cyttsp5_hid_output_bl_get_panel_id_(cd, panel_id);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2756,49 +2756,49 @@ static int cyttsp5_get_hid_descriptor_(struct cyttsp5_core_data *cd,
 	cd->hid_cmd_state = 1;
 	mutex_unlock(&cd->system_lock);
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	/* Set HID descriptor register */
 	memcpy(cmd, &cd->hid_core.hid_desc_register,
 		sizeof(cd->hid_core.hid_desc_register));
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	rc = cyttsp5_adap_write_read_specific(cd, 2, cmd, NULL);
 	if (rc) {
-		dev_err(dev, "%s: failed to get HID descriptor length and version, rc=%d\n",
+		dev_dbg(dev, "%s: failed to get HID descriptor length and version, rc=%d\n",
 			__func__, rc);
 		goto error;
 	}
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	t = wait_event_timeout(cd->wait_q, (cd->hid_cmd_state == 0),
 			msecs_to_jiffies(CY_HID_GET_HID_DESCRIPTOR_TIMEOUT));
 	if (IS_TMO(t)) {
-		dev_err(cd->dev, "%s: HID get descriptor timed out\n",
+		dev_dbg(cd->dev, "%s: HID get descriptor timed out\n",
 			__func__);
        	rc = cyttsp5_read_input(cd);
        	if (!rc)
         	cyttsp5_parse_input(cd);
 	}
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	memcpy((u8 *)desc, cd->response_buf, sizeof(struct cyttsp5_hid_desc));
 
 	/* Check HID descriptor length and version */
-	dev_err(dev, "%s: HID len:%X HID ver:%X\n", __func__,
+	dev_dbg(dev, "%s: HID len:%X HID ver:%X\n", __func__,
 		le16_to_cpu(desc->hid_desc_len),
 		le16_to_cpu(desc->bcd_version));
 
 	if (le16_to_cpu(desc->hid_desc_len) != sizeof(*desc) ||
 		le16_to_cpu(desc->bcd_version) != CY_HID_VERSION) {
-		dev_err(dev, "%s: Unsupported HID version\n", __func__);
+		dev_dbg(dev, "%s: Unsupported HID version\n", __func__);
 		return -ENODEV;
 	}
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	goto exit;
 
@@ -2817,7 +2817,7 @@ static int cyttsp5_get_hid_descriptor(struct cyttsp5_core_data *cd,
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -2825,7 +2825,7 @@ static int cyttsp5_get_hid_descriptor(struct cyttsp5_core_data *cd,
 	rc = cyttsp5_get_hid_descriptor_(cd, desc);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 
 	return rc;
 }
@@ -2852,24 +2852,24 @@ static int cyttsp5_hw_soft_reset(struct cyttsp5_core_data *cd)
 
 	rc = cyttsp5_hid_cmd_reset_(cd);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: FAILED to execute SOFT reset\n",
+		dev_dbg(cd->dev, "%s: FAILED to execute SOFT reset\n",
 				__func__);
 		return rc;
 	}
-	dev_err(cd->dev, "%s: execute SOFT reset\n", __func__);
+	dev_dbg(cd->dev, "%s: execute SOFT reset\n", __func__);
 	return 0;
 }
 
 static int cyttsp5_hw_hard_reset(struct cyttsp5_core_data *cd)
 {
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 	if (cd->cpdata->xres) {
 		cd->cpdata->xres(cd->cpdata, cd->dev);
-		dev_err(cd->dev, "%s: execute HARD reset\n", __func__);
+		dev_dbg(cd->dev, "%s: execute HARD reset\n", __func__);
 		return 0;
 	}
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
-	dev_err(cd->dev, "%s: FAILED to execute HARD reset\n", __func__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: FAILED to execute HARD reset\n", __func__);
 	return -ENODEV;
 }
 
@@ -2924,7 +2924,7 @@ static int parse_report_descriptor(struct cyttsp5_core_data *cd,
 	int logical_collection_count = 0;
 	int collection_nest = 0;
 
-	dev_err(cd->dev, "%s: Report descriptor length: %zu\n",
+	dev_dbg(cd->dev, "%s: Report descriptor length: %zu\n",
 		__func__, len);
 
 	mutex_lock(&cd->hid_report_lock);
@@ -3153,14 +3153,14 @@ continue_main_item:
 	}
 
 	if (buf != end) {
-		dev_err(cd->dev, "%s: Report descriptor length invalid\n",
+		dev_dbg(cd->dev, "%s: Report descriptor length invalid\n",
 			__func__);
 		rc = -EINVAL;
 		goto exit;
 	}
 
 	if (collection_nest) {
-		dev_err(cd->dev, "%s: Unbalanced collection items (%d)\n",
+		dev_dbg(cd->dev, "%s: Unbalanced collection items (%d)\n",
 			__func__, collection_nest);
 		rc = -EINVAL;
 		goto exit;
@@ -3245,7 +3245,7 @@ static int setup_report_descriptor(struct cyttsp5_core_data *cd)
 				cyttsp5_tch_abs_field_map[i],
 				tch_collection_usage_page);
 		if (field) {
-			dev_err(cd->dev,
+			dev_dbg(cd->dev,
 				" Field %p: rep_cnt:%d rep_sz:%d off:%d data:%02X min:%d max:%d usage_page:%08X\n",
 				field, field->report_count, field->report_size,
 				field->offset, field->data_type,
@@ -3253,7 +3253,7 @@ static int setup_report_descriptor(struct cyttsp5_core_data *cd)
 				field->usage_page);
 			fill_tch_abs(&si->tch_abs[i], field);
 			si->tch_abs[i].report = 1;
-			dev_err(cd->dev, "%s: ofs:%zu size:%zu min:%zu max:%zu bofs:%zu report:%d",
+			dev_dbg(cd->dev, "%s: ofs:%zu size:%zu min:%zu max:%zu bofs:%zu report:%d",
 				cyttsp5_tch_abs_string[i],
 				si->tch_abs[i].ofs, si->tch_abs[i].size,
 				si->tch_abs[i].min, si->tch_abs[i].max,
@@ -3268,7 +3268,7 @@ static int setup_report_descriptor(struct cyttsp5_core_data *cd)
 				cyttsp5_tch_hdr_field_map[i],
 				tch_collection_usage_page);
 		if (field) {
-			dev_err(cd->dev,
+			dev_dbg(cd->dev,
 				" Field %p: rep_cnt:%d rep_sz:%d off:%d data:%02X min:%d max:%d usage_page:%08X\n",
 				field, field->report_count, field->report_size,
 				field->offset, field->data_type,
@@ -3276,7 +3276,7 @@ static int setup_report_descriptor(struct cyttsp5_core_data *cd)
 				field->usage_page);
 			fill_tch_abs(&si->tch_hdr[i], field);
 			si->tch_hdr[i].report = 1;
-			dev_err(cd->dev, "%s: ofs:%zu size:%zu min:%zu max:%zu bofs:%zu report:%d",
+			dev_dbg(cd->dev, "%s: ofs:%zu size:%zu min:%zu max:%zu bofs:%zu report:%d",
 				cyttsp5_tch_hdr_string[i],
 				si->tch_hdr[i].ofs, si->tch_hdr[i].size,
 				si->tch_hdr[i].min, si->tch_hdr[i].max,
@@ -3325,7 +3325,7 @@ static int setup_report_descriptor(struct cyttsp5_core_data *cd)
 		}
 	}
 
-	dev_err(cd->dev, "Features: easywake:%d noise_metric:%d tracking_heatmap:%d sensor_data:%d\n",
+	dev_dbg(cd->dev, "Features: easywake:%d noise_metric:%d tracking_heatmap:%d sensor_data:%d\n",
 			cd->features.easywake, cd->features.noise_metric,
 			cd->features.tracking_heatmap,
 			cd->features.sensor_data);
@@ -3351,7 +3351,7 @@ static int cyttsp5_get_report_descriptor_(struct cyttsp5_core_data *cd)
 
 	rc = cyttsp5_adap_write_read_specific(cd, 2, cmd, NULL);
 	if (rc) {
-		dev_err(dev, "%s: failed to get HID descriptor length and version, rc=%d\n",
+		dev_dbg(dev, "%s: failed to get HID descriptor length and version, rc=%d\n",
 			__func__, rc);
 		goto error;
 	}
@@ -3359,7 +3359,7 @@ static int cyttsp5_get_report_descriptor_(struct cyttsp5_core_data *cd)
 	t = wait_event_timeout(cd->wait_q, (cd->hid_cmd_state == 0),
 		msecs_to_jiffies(CY_HID_GET_REPORT_DESCRIPTOR_TIMEOUT));
 	if (IS_TMO(t)) {
-		dev_err(cd->dev, "%s: HID get descriptor timed out\n",
+		dev_dbg(cd->dev, "%s: HID get descriptor timed out\n",
 			__func__);
 		rc = -ETIME;
 		goto error;
@@ -3371,18 +3371,18 @@ static int cyttsp5_get_report_descriptor_(struct cyttsp5_core_data *cd)
 	rc = parse_report_descriptor(cd, cd->response_buf + 3,
 		get_unaligned_le16(&cd->response_buf[0]) - 3);
 	if (rc) {
-		dev_err(cd->dev, "%s: Error parsing report descriptor r=%d\n",
+		dev_dbg(cd->dev, "%s: Error parsing report descriptor r=%d\n",
 			__func__, rc);
 	}
 
-	dev_err(cd->dev, "%s: %d reports found in descriptor\n", __func__,
+	dev_dbg(cd->dev, "%s: %d reports found in descriptor\n", __func__,
 		cd->num_hid_reports);
 
 	for (t = 0; t < cd->num_hid_reports; t++) {
 		struct cyttsp5_hid_report *report = cd->hid_reports[t];
 		int j;
 
-		dev_err(cd->dev,
+		dev_dbg(cd->dev,
 			"Report %d: type:%d id:%02X size:%d fields:%d rec_fld_index:%d hdr_sz:%d rec_sz:%d usage_page:%08X\n",
 			t, report->type, report->id,
 			report->size, report->num_fields,
@@ -3392,14 +3392,14 @@ static int cyttsp5_get_report_descriptor_(struct cyttsp5_core_data *cd)
 		for (j = 0; j < report->num_fields; j++) {
 			struct cyttsp5_hid_field *field = report->fields[j];
 
-			dev_err(cd->dev,
+			dev_dbg(cd->dev,
 				" Field %d: rep_cnt:%d rep_sz:%d off:%d data:%02X min:%d max:%d usage_page:%08X\n",
 				j, field->report_count, field->report_size,
 				field->offset, field->data_type,
 				field->logical_min, field->logical_max,
 				field->usage_page);
 
-			dev_err(cd->dev, "  Collections Phys:%08X App:%08X Log:%08X\n",
+			dev_dbg(cd->dev, "  Collections Phys:%08X App:%08X Log:%08X\n",
 				field->collection_usage_pages
 					[HID_COLLECTION_PHYSICAL],
 				field->collection_usage_pages
@@ -3414,7 +3414,7 @@ static int cyttsp5_get_report_descriptor_(struct cyttsp5_core_data *cd)
 	/* Free it for now */
 	cyttsp5_free_hid_reports_(cd);
 
-	dev_err(cd->dev, "%s: %d reports found in descriptor\n", __func__,
+	dev_dbg(cd->dev, "%s: %d reports found in descriptor\n", __func__,
 		cd->num_hid_reports);
 
 	goto exit;
@@ -3463,7 +3463,7 @@ static void cyttsp5_queue_startup_(struct cyttsp5_core_data *cd)
 		schedule_work(&cd->startup_work);
 		dev_info(cd->dev, "%s: cyttsp5_startup queued\n", __func__);
 	} else {
-		dev_err(cd->dev, "%s: startup_state = %d\n", __func__,
+		dev_dbg(cd->dev, "%s: startup_state = %d\n", __func__,
 			cd->startup_state);
 	}
 }
@@ -3480,14 +3480,14 @@ static void call_atten_cb(struct cyttsp5_core_data *cd,
 {
 	struct atten_node *atten, *atten_n;
 
-	dev_err(cd->dev, "%s: check list type=%d mode=%d\n",
+	dev_dbg(cd->dev, "%s: check list type=%d mode=%d\n",
 		__func__, type, mode);
 	spin_lock(&cd->spinlock);
 	list_for_each_entry_safe(atten, atten_n,
 			&cd->atten_list[type], node) {
 		if (!mode || atten->mode & mode) {
 			spin_unlock(&cd->spinlock);
-			dev_err(cd->dev, "%s: attention for '%s'", __func__,
+			dev_dbg(cd->dev, "%s: attention for '%s'", __func__,
 				dev_name(atten->dev));
 			atten->func(atten->dev);
 			spin_lock(&cd->spinlock);
@@ -3549,7 +3549,7 @@ static int cyttsp5_core_poweroff_device_(struct cyttsp5_core_data *cd)
 
 	rc = cd->cpdata->power(cd->cpdata, 0, cd->dev, 0);
 	if (rc < 0)
-		dev_err(cd->dev, "%s: HW Power down fails r=%d\n",
+		dev_dbg(cd->dev, "%s: HW Power down fails r=%d\n",
 				__func__, rc);
 	return rc;
 }
@@ -3585,7 +3585,7 @@ static int cyttsp5_core_sleep(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -3593,9 +3593,9 @@ static int cyttsp5_core_sleep(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_core_sleep_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 	else
-		dev_err(cd->dev, "%s: pass release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: pass release exclusive\n", __func__);
 
 	return rc;
 }
@@ -3615,7 +3615,7 @@ static int cyttsp5_wakeup_host(struct cyttsp5_core_data *cd)
 	cd->wake_initiated_by_device = 1;
 	event_id = cd->input_buf[3];
 
-	dev_err(cd->dev, "%s: e=%d, rc=%d\n", __func__, event_id, rc);
+	dev_dbg(cd->dev, "%s: e=%d, rc=%d\n", __func__, event_id, rc);
 
 	if (rc) {
 		cyttsp5_core_sleep_(cd);
@@ -3638,7 +3638,7 @@ exit:
 
 	cd->wake_initiated_by_device = 1;
 
-	dev_err(cd->dev, "%s: rc=%d\n", __func__, rc);
+	dev_dbg(cd->dev, "%s: rc=%d\n", __func__, rc);
 
 	if (rc) {
 		cyttsp5_core_sleep_(cd);
@@ -3650,7 +3650,7 @@ exit:
 	report_length = (cd->input_buf[1] << 8) | (cd->input_buf[0]);
 	cd->gesture_data_length = report_length - 4;
 
-	dev_err(cd->dev, "%s: gesture_id = %d, gesture_data_length = %d\n",
+	dev_dbg(cd->dev, "%s: gesture_id = %d, gesture_data_length = %d\n",
 		__func__, cd->gesture_id, cd->gesture_data_length);
 
 	for (i = 0; i < cd->gesture_data_length; i++)
@@ -3758,9 +3758,9 @@ static int parse_touch_input(struct cyttsp5_core_data *cd, int size)
 	int report_id = cd->input_buf[2];
 	int rc = -EINVAL;
 
-	dev_err(cd->dev, "%s: Received touch report\n", __func__);
+	dev_dbg(cd->dev, "%s: Received touch report\n", __func__);
 	if (!si->ready) {
-		dev_err(cd->dev,
+		dev_dbg(cd->dev,
 			"%s: Need system information to parse touches\n",
 			__func__);
 		return 0;
@@ -3789,7 +3789,7 @@ static int parse_touch_input(struct cyttsp5_core_data *cd, int size)
 
 static int parse_command_input(struct cyttsp5_core_data *cd, int size)
 {
-	dev_err(cd->dev, "%s: Received cmd interrupt\n", __func__);
+	dev_dbg(cd->dev, "%s: Received cmd interrupt\n", __func__);
 
 	memcpy(cd->response_buf, cd->input_buf, size);
 
@@ -3811,12 +3811,12 @@ int cyttsp5_parse_input(struct cyttsp5_core_data *cd)
 
 	/* check reset */
 	if (size == 0) {
-		dev_err(cd->dev, "%s: Reset complete\n", __func__);
+		dev_dbg(cd->dev, "%s: Reset complete\n", __func__);
 		memcpy(cd->response_buf, cd->input_buf, 2);
 		mutex_lock(&cd->system_lock);
 		if (!cd->hid_reset_cmd_state && !cd->hid_cmd_state) {
 			mutex_unlock(&cd->system_lock);
-			dev_err(cd->dev, "%s: Device Initiated Reset\n",
+			dev_dbg(cd->dev, "%s: Device Initiated Reset\n",
 					__func__);
 			return 0;
 		}
@@ -3837,7 +3837,7 @@ int cyttsp5_parse_input(struct cyttsp5_core_data *cd)
 		return 0;
 
 	report_id = cd->input_buf[2];
-	dev_err(cd->dev, "%s: report_id:%X\n", __func__, report_id);
+	dev_dbg(cd->dev, "%s: report_id:%X\n", __func__, report_id);
 
 	/* Check wake-up report */
 	if (report_id == HID_WAKEUP_REPORT_ID) {
@@ -3886,11 +3886,11 @@ int cyttsp5_read_input(struct cyttsp5_core_data *cd)
 read:
 	rc = cyttsp5_adap_read_default_nosize(cd, cd->input_buf, CY_MAX_INPUT);
 	if (rc) {
-		dev_err(dev, "%s: Error getting report, r=%d\n",
+		dev_dbg(dev, "%s: Error getting report, r=%d\n",
 				__func__, rc);
 		return rc;
 	}
-	dev_err(dev, "%s: Read input successfully\n", __func__);
+	dev_dbg(dev, "%s: Read input successfully\n", __func__);
 	return rc;
 }
 
@@ -3905,14 +3905,14 @@ int _cyttsp5_subscribe_attention(struct device *dev,
 	if (!atten_new)
 		return -ENOMEM;
 
-	dev_err(cd->dev, "%s from '%s'\n", __func__, dev_name(cd->dev));
+	dev_dbg(cd->dev, "%s from '%s'\n", __func__, dev_name(cd->dev));
 
 	spin_lock(&cd->spinlock);
 	list_for_each_entry(atten, &cd->atten_list[type], node) {
 		if (atten->id == id && atten->mode == mode) {
 			spin_unlock(&cd->spinlock);
 			kfree(atten_new);
-			dev_err(cd->dev, "%s: %s=%p %s=%d\n",
+			dev_dbg(cd->dev, "%s: %s=%p %s=%d\n",
 				 __func__,
 				 "already subscribed attention",
 				 dev, "mode", mode);
@@ -3945,7 +3945,7 @@ int _cyttsp5_unsubscribe_attention(struct device *dev,
 			list_del(&atten->node);
 			spin_unlock(&cd->spinlock);
 			kfree(atten);
-			dev_err(cd->dev, "%s: %s=%p %s=%d\n",
+			dev_dbg(cd->dev, "%s: %s=%p %s=%d\n",
 				__func__,
 				"unsub for atten->dev", atten->dev,
 				"atten->mode", atten->mode);
@@ -3977,10 +3977,10 @@ static int cyttsp5_reset(struct cyttsp5_core_data *cd)
 	int rc;
 
 	/* reset hardware */
-	dev_err(cd->dev, "%s: reset hw...\n", __func__);
+	dev_dbg(cd->dev, "%s: reset hw...\n", __func__);
 	rc = cyttsp5_hw_reset(cd);
 	if (rc < 0)
-		dev_err(cd->dev, "%s: %s dev='%s' r=%d\n", __func__,
+		dev_dbg(cd->dev, "%s: %s dev='%s' r=%d\n", __func__,
 			"Fail hw reset", dev_name(cd->dev), rc);
 	return rc;
 }
@@ -3994,18 +3994,18 @@ static int cyttsp5_reset_and_wait(struct cyttsp5_core_data *cd)
 	cd->hid_reset_cmd_state = 1;
 	mutex_unlock(&cd->system_lock);
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	rc = cyttsp5_reset(cd);
 	if (rc < 0)
 		goto error;
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	t = wait_event_timeout(cd->wait_q, (cd->hid_reset_cmd_state == 0),
 			msecs_to_jiffies(CY_HID_RESET_TIMEOUT));
 	if (IS_TMO(t)) {
-		dev_err(cd->dev, "%s: reset timed out\n",
+		dev_dbg(cd->dev, "%s: reset timed out\n",
 			__func__);
 		rc = -ETIME;
 		goto error;
@@ -4036,7 +4036,7 @@ static int _cyttsp5_request_reset(struct device *dev)
 
 	rc = cyttsp5_reset(cd);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: Error on h/w reset r=%d\n",
+		dev_dbg(cd->dev, "%s: Error on h/w reset r=%d\n",
 			__func__, rc);
 		mutex_lock(&cd->system_lock);
 		cd->hid_reset_cmd_state = 0;
@@ -4127,7 +4127,7 @@ static int cyttsp5_restore_parameters_(struct cyttsp5_core_data *cd)
 	spin_lock(&cd->spinlock);
 	list_for_each_entry(param, &cd->param_list, node) {
 		spin_unlock(&cd->spinlock);
-		dev_err(cd->dev, "%s: Parameter id:%d value:%d\n",
+		dev_dbg(cd->dev, "%s: Parameter id:%d value:%d\n",
 			 __func__, param->id, param->value);
 		rc = cyttsp5_hid_output_set_param_(cd, param->id,
 				param->value, param->size);
@@ -4147,12 +4147,12 @@ static int _fast_startup(struct cyttsp5_core_data *cd)
 
 reset:
 	if (retry != CY_CORE_STARTUP_RETRY_COUNT)
-		dev_err(cd->dev, "%s: Retry %d\n", __func__,
+		dev_dbg(cd->dev, "%s: Retry %d\n", __func__,
 			CY_CORE_STARTUP_RETRY_COUNT - retry);
 
 	rc = cyttsp5_get_hid_descriptor_(cd, &cd->hid_desc);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: Error on getting HID descriptor r=%d\n",
+		dev_dbg(cd->dev, "%s: Error on getting HID descriptor r=%d\n",
 			__func__, rc);
 		if (retry--)
 			goto reset;
@@ -4164,7 +4164,7 @@ reset:
 		dev_info(cd->dev, "%s: Bootloader mode\n", __func__);
 		rc = cyttsp5_hid_output_bl_launch_app_(cd);
 		if (rc < 0) {
-			dev_err(cd->dev, "%s: Error on launch app r=%d\n",
+			dev_dbg(cd->dev, "%s: Error on launch app r=%d\n",
 				__func__, rc);
 			if (retry--)
 				goto reset;
@@ -4172,7 +4172,7 @@ reset:
 		}
 		rc = cyttsp5_get_hid_descriptor_(cd, &cd->hid_desc);
 		if (rc < 0) {
-			dev_err(cd->dev,
+			dev_dbg(cd->dev,
 				"%s: Error on getting HID descriptor r=%d\n",
 				__func__, rc);
 			if (retry--)
@@ -4189,7 +4189,7 @@ reset:
 
 	rc = cyttsp5_restore_parameters_(cd);
 	if (rc)
-		dev_err(cd->dev, "%s: failed to restore parameters rc=%d\n",
+		dev_dbg(cd->dev, "%s: failed to restore parameters rc=%d\n",
 			__func__, rc);
 
 exit:
@@ -4203,7 +4203,7 @@ static int cyttsp5_core_poweron_device_(struct cyttsp5_core_data *cd)
 
 	rc = cd->cpdata->power(cd->cpdata, 1, dev, 0);
 	if (rc < 0) {
-		dev_err(dev, "%s: HW Power up fails r=%d\n", __func__, rc);
+		dev_dbg(dev, "%s: HW Power up fails r=%d\n", __func__, rc);
 		goto exit;
 	}
 
@@ -4243,7 +4243,7 @@ static int cyttsp5_core_wake(struct cyttsp5_core_data *cd)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		return rc;
 	}
@@ -4251,9 +4251,9 @@ static int cyttsp5_core_wake(struct cyttsp5_core_data *cd)
 	rc = cyttsp5_core_wake_(cd);
 
 	if (release_exclusive(cd, cd->dev) < 0)
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 	else
-		dev_err(cd->dev, "%s: pass release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: pass release exclusive\n", __func__);
 
 	return rc;
 }
@@ -4285,7 +4285,7 @@ static int cyttsp5_get_ic_crc_(struct cyttsp5_core_data *cd, u8 ebid)
 exit:
 	cyttsp5_hid_output_resume_scanning_(cd);
 error:
-	dev_err(cd->dev, "%s: CRC: ebid:%d, crc:0x%04X\n",
+	dev_dbg(cd->dev, "%s: CRC: ebid:%d, crc:0x%04X\n",
 			__func__, ebid, si->ttconfig.crc);
 	return rc;
 }
@@ -4326,29 +4326,29 @@ static int cyttsp5_startup_(struct cyttsp5_core_data *cd, bool reset)
 	int rc;
 	bool detected = false;
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 #ifdef TTHE_TUNER_SUPPORT
 	tthe_print(cd, NULL, 0, "enter startup");
 #endif
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 reset:
 	if (retry != CY_CORE_STARTUP_RETRY_COUNT)
-		dev_err(cd->dev, "%s: Retry %d\n", __func__,
+		dev_dbg(cd->dev, "%s: Retry %d\n", __func__,
 			CY_CORE_STARTUP_RETRY_COUNT - retry);
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	rc = cyttsp5_check_and_deassert_int(cd);
 
 	if (reset || retry != CY_CORE_STARTUP_RETRY_COUNT) {
 		/* reset hardware */
-		dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+		dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 		rc = cyttsp5_reset_and_wait(cd);
 		if (rc < 0) {
-			dev_err(cd->dev, "%s: Error on h/w reset r=%d\n",
+			dev_dbg(cd->dev, "%s: Error on h/w reset r=%d\n",
 					__func__, rc);
 			if (retry--)
 				goto reset;
@@ -4356,11 +4356,11 @@ reset:
 		}
 	}
 
-	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
+	dev_dbg(cd->dev, "%s: %d\n", __func__, __LINE__);
 
 	rc = cyttsp5_get_hid_descriptor_(cd, &cd->hid_desc);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: Error on getting HID descriptor r=%d\n",
+		dev_dbg(cd->dev, "%s: Error on getting HID descriptor r=%d\n",
 			__func__, rc);
 		if (retry--)
 			goto reset;
@@ -4374,7 +4374,7 @@ reset:
 	if (cd->mode == CY_MODE_OPERATIONAL) {
 		rc = cyttsp5_hid_output_start_bootloader_(cd);
 		if (rc < 0) {
-			dev_err(cd->dev, "%s: Error on start bootloader r=%d\n",
+			dev_dbg(cd->dev, "%s: Error on start bootloader r=%d\n",
 				__func__, rc);
 			if (retry--)
 				goto reset;
@@ -4385,11 +4385,11 @@ reset:
 
 	cyttsp5_hid_output_bl_get_panel_id_(cd, &cd->panel_id);
 
-	dev_err(cd->dev, "%s: Panel ID: 0x%02X\n", __func__, cd->panel_id);
+	dev_dbg(cd->dev, "%s: Panel ID: 0x%02X\n", __func__, cd->panel_id);
 
 	rc = cyttsp5_hid_output_bl_launch_app_(cd);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: Error on launch app r=%d\n",
+		dev_dbg(cd->dev, "%s: Error on launch app r=%d\n",
 			__func__, rc);
 		if (retry--)
 			goto reset;
@@ -4398,7 +4398,7 @@ reset:
 
 	rc = cyttsp5_get_hid_descriptor_(cd, &cd->hid_desc);
 	if (rc < 0) {
-		dev_err(cd->dev,
+		dev_dbg(cd->dev,
 			"%s: Error on getting HID descriptor r=%d\n",
 			__func__, rc);
 		if (retry--)
@@ -4427,7 +4427,7 @@ reset:
 	else if (cd->mode == CY_MODE_BOOTLOADER)
 		dev_info(cd->dev, "%s: Bootloader mode\n", __func__);
 	else if (cd->mode == CY_MODE_UNKNOWN) {
-		dev_err(cd->dev, "%s: Unknown mode\n", __func__);
+		dev_dbg(cd->dev, "%s: Unknown mode\n", __func__);
 		rc = -ENODEV;
 		mutex_unlock(&cd->system_lock);
 		if (retry--)
@@ -4439,7 +4439,7 @@ reset:
 	dev_info(cd->dev, "%s: Reading report descriptor\n", __func__);
 	rc = cyttsp5_get_report_descriptor_(cd);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: Error on getting report descriptor r=%d\n",
+		dev_dbg(cd->dev, "%s: Error on getting report descriptor r=%d\n",
 			__func__, rc);
 		if (retry--)
 			goto reset;
@@ -4451,7 +4451,7 @@ reset:
 
 	rc = cyttsp5_hid_output_get_sysinfo_(cd);
 	if (rc) {
-		dev_err(cd->dev, "%s: Error on getting sysinfo r=%d\n",
+		dev_dbg(cd->dev, "%s: Error on getting sysinfo r=%d\n",
 			__func__, rc);
 		if (retry--)
 			goto reset;
@@ -4466,18 +4466,18 @@ reset:
 	if (!IS_PIP_VER_GE(&cd->sysinfo, 1, 2)) {
 		rc = cyttsp5_get_config_ver_(cd);
 		if (rc)
-			dev_err(cd->dev, "%s: failed to read config version rc=%d\n",
+			dev_dbg(cd->dev, "%s: failed to read config version rc=%d\n",
 				__func__, rc);
 	}
 
 	rc = cyttsp5_get_ic_crc_(cd, CY_TCH_PARM_EBID);
 	if (rc)
-		dev_err(cd->dev, "%s: failed to crc data rc=%d\n",
+		dev_dbg(cd->dev, "%s: failed to crc data rc=%d\n",
 			__func__, rc);
 
 	rc = cyttsp5_restore_parameters_(cd);
 	if (rc)
-		dev_err(cd->dev, "%s: failed to restore parameters rc=%d\n",
+		dev_dbg(cd->dev, "%s: failed to restore parameters rc=%d\n",
 			__func__, rc);
 
 	/* attention startup */
@@ -4507,7 +4507,7 @@ static int cyttsp5_startup(struct cyttsp5_core_data *cd, bool reset)
 
 	rc = request_exclusive(cd, cd->dev, CY_REQUEST_EXCLUSIVE_TIMEOUT);
 	if (rc < 0) {
-		dev_err(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
+		dev_dbg(cd->dev, "%s: fail get exclusive ex=%p own=%p\n",
 				__func__, cd->exclusive_dev, cd->dev);
 		goto exit;
 	}
@@ -4516,9 +4516,9 @@ static int cyttsp5_startup(struct cyttsp5_core_data *cd, bool reset)
 
 	if (release_exclusive(cd, cd->dev) < 0)
 		/* Don't return fail code, mode is already changed. */
-		dev_err(cd->dev, "%s: fail to release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: fail to release exclusive\n", __func__);
 	else
-		dev_err(cd->dev, "%s: pass release exclusive\n", __func__);
+		dev_dbg(cd->dev, "%s: pass release exclusive\n", __func__);
 
 exit:
 	mutex_lock(&cd->system_lock);
@@ -4539,7 +4539,7 @@ static void cyttsp5_startup_work_function(struct work_struct *work)
 
 	rc = cyttsp5_startup(cd, true);
 	if (rc < 0)
-		dev_err(cd->dev, "%s: Fail queued startup r=%d\n",
+		dev_dbg(cd->dev, "%s: Fail queued startup r=%d\n",
 			__func__, rc);
 }
 
@@ -4555,7 +4555,7 @@ static int cyttsp5_core_rt_suspend(struct device *dev)
 
 	rc = cyttsp5_core_sleep(cd);
 	if (rc < 0) {
-		dev_err(dev, "%s: Error on sleep\n", __func__);
+		dev_dbg(dev, "%s: Error on sleep\n", __func__);
 		return -EAGAIN;
 	}
 	return 0;
@@ -4568,7 +4568,7 @@ static int cyttsp5_core_rt_resume(struct device *dev)
 
 	rc = cyttsp5_core_wake(cd);
 	if (rc < 0) {
-		dev_err(dev, "%s: Error on wake\n", __func__);
+		dev_dbg(dev, "%s: Error on wake\n", __func__);
 		return -EAGAIN;
 	}
 
@@ -4620,7 +4620,7 @@ static int cyttsp5_pm_notifier(struct notifier_block *nb,
 			struct cyttsp5_core_data, pm_notifier);
 
 	if (action == PM_SUSPEND_PREPARE) {
-		dev_err(cd->dev, "%s: Suspend prepare\n", __func__);
+		dev_dbg(cd->dev, "%s: Suspend prepare\n", __func__);
 
 		/*
 		 * If not runtime PM suspended, either call runtime
@@ -4694,7 +4694,7 @@ static ssize_t cyttsp5_hw_reset_store(struct device *dev,
 
 	rc = cyttsp5_startup(cd, true);
 	if (rc < 0)
-		dev_err(dev, "%s: HW reset failed r=%d\n",
+		dev_dbg(dev, "%s: HW reset failed r=%d\n",
 			__func__, rc);
 
 	return size;
@@ -4714,7 +4714,7 @@ static ssize_t cyttsp5_drv_debug_store(struct device *dev,
 
 	rc = kstrtoul(buf, 10, &value);
 	if (rc < 0) {
-		dev_err(dev, "%s: Invalid value\n", __func__);
+		dev_dbg(dev, "%s: Invalid value\n", __func__);
 		goto cyttsp5_drv_debug_store_exit;
 	}
 
@@ -4729,7 +4729,7 @@ static ssize_t cyttsp5_drv_debug_store(struct device *dev,
 		dev_info(dev, "%s: SUSPEND (cd=%p)\n", __func__, cd);
 		rc = cyttsp5_core_sleep(cd);
 		if (rc)
-			dev_err(dev, "%s: Suspend failed rc=%d\n",
+			dev_dbg(dev, "%s: Suspend failed rc=%d\n",
 				__func__, rc);
 		else
 			dev_info(dev, "%s: Suspend succeeded\n", __func__);
@@ -4739,7 +4739,7 @@ static ssize_t cyttsp5_drv_debug_store(struct device *dev,
 		dev_info(dev, "%s: RESUME (cd=%p)\n", __func__, cd);
 		rc = cyttsp5_core_wake(cd);
 		if (rc)
-			dev_err(dev, "%s: Resume failed rc=%d\n",
+			dev_dbg(dev, "%s: Resume failed rc=%d\n",
 				__func__, rc);
 		else
 			dev_info(dev, "%s: Resume succeeded\n", __func__);
@@ -4822,7 +4822,7 @@ static ssize_t cyttsp5_drv_debug_store(struct device *dev,
 		break;
 #endif
 	default:
-		dev_err(dev, "%s: Invalid value\n", __func__);
+		dev_dbg(dev, "%s: Invalid value\n", __func__);
 	}
 
 cyttsp5_drv_debug_store_exit:
@@ -5013,7 +5013,7 @@ static int add_sysfs_interfaces(struct device *dev)
 undo:
 	for (i--; i >= 0; i--)
 		device_remove_file(dev, attributes + i);
-	dev_err(dev, "%s: failed to create sysfs interface\n", __func__);
+	dev_dbg(dev, "%s: failed to create sysfs interface\n", __func__);
 	return -ENODEV;
 }
 
@@ -5209,7 +5209,7 @@ static void cyttsp5_probe_modules(struct cyttsp5_core_data *cd)
 	list_for_each_entry(m, &module_list, node) {
 		rc = cyttsp5_probe_module(cd, m);
 		if (rc)
-			dev_err(cd->dev, "%s: Probe fails for module %s\n",
+			dev_dbg(cd->dev, "%s: Probe fails for module %s\n",
 				__func__, m->name);
 	}
 	mutex_unlock(&module_list_lock);
@@ -5406,7 +5406,7 @@ static void cyttsp5_setup_fb_notifier(struct cyttsp5_core_data *cd)
 
 	rc = fb_register_client(&cd->fb_notifier);
 	if (rc)
-		dev_err(cd->dev, "Unable to register fb_notifier: %d\n", rc);
+		dev_dbg(cd->dev, "Unable to register fb_notifier: %d\n", rc);
 }
 #endif
 
@@ -5419,14 +5419,14 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 	int rc = 0;
 
 	if (!pdata || !pdata->core_pdata || !pdata->mt_pdata) {
-		dev_err(dev, "%s: Missing platform data\n", __func__);
+		dev_dbg(dev, "%s: Missing platform data\n", __func__);
 		rc = -ENODEV;
 		goto error_no_pdata;
 	}
 
 	if (pdata->core_pdata->flags & CY_CORE_FLAG_POWEROFF_ON_SLEEP) {
 		if (!pdata->core_pdata->power) {
-			dev_err(dev, "%s: Missing platform data function\n",
+			dev_dbg(dev, "%s: Missing platform data function\n",
 					__func__);
 			rc = -ENODEV;
 			goto error_no_pdata;
@@ -5496,7 +5496,7 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 		rc = 0;
 	}
 	if (rc < 0)
-		dev_err(cd->dev, "%s: HW Init fail r=%d\n", __func__, rc);
+		dev_dbg(cd->dev, "%s: HW Init fail r=%d\n", __func__, rc);
 
 	rc = cyttsp5_startup(cd, false);
 
@@ -5526,7 +5526,7 @@ error_detect:
 	kfree(cd);
 error_alloc_data:
 error_no_pdata:
-	dev_err(dev, "%s failed.\n", __func__);
+	dev_dbg(dev, "%s failed.\n", __func__);
 	return rc;
 }
 EXPORT_SYMBOL_GPL(cyttsp5_probe);

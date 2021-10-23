@@ -63,7 +63,6 @@ MODULE_PARM_DESC(debug, "print a lot of debug information");
 
 #define i2c_hid_dbg(ihid, fmt, arg...)					  \
 do {									  \
-		dev_printk(KERN_ERR, &(ihid)->client->dev, fmt, ##arg); \
 } while (0)
 
 struct i2c_hid_desc {
@@ -271,12 +270,12 @@ static int __i2c_hid_command(struct i2c_client *client,
 	if (wait && (ihid->quirks & I2C_HID_QUIRK_NO_IRQ_AFTER_RESET)) {
 		msleep(100);
 	} else if (wait) {
-		i2c_hid_dbg(ihid, "%s: waiting...\n", __func__);
+		printk(KERN_ERR "%s: waiting...\n", __func__);
 		if (!wait_event_timeout(ihid->wait,
 				!test_bit(I2C_HID_RESET_PENDING, &ihid->flags),
 				msecs_to_jiffies(5000)))
 			ret = -ENODATA;
-		i2c_hid_dbg(ihid, "%s: finished.\n", __func__);
+		printk(KERN_ERR "%s: finished.\n", __func__);
 	}
 
 	return ret;
@@ -453,18 +452,26 @@ static int i2c_hid_hwreset(struct i2c_client *client)
 	 */
 	mutex_lock(&ihid->reset_lock);
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 	ret = i2c_hid_set_power(client, I2C_HID_PWR_ON);
 	if (ret)
 		goto out_unlock;
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	i2c_hid_dbg(ihid, "resetting...\n");
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	ret = i2c_hid_command(client, &hid_reset_cmd, NULL, 0);
 	if (ret) {
+		printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 		dev_err(&client->dev, "failed to reset device.\n");
 		i2c_hid_set_power(client, I2C_HID_PWR_SLEEP);
 		goto out_unlock;
 	}
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	/* At least some SIS devices need this after reset */
 	if (!(ihid->quirks & I2C_HID_QUIRK_NO_WAKEUP_AFTER_RESET))
@@ -706,29 +713,40 @@ static int i2c_hid_parse(struct hid_device *hid)
 
 	i2c_hid_dbg(ihid, "entering %s\n", __func__);
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	rsize = le16_to_cpu(hdesc->wReportDescLength);
 	if (!rsize || rsize > HID_MAX_DESCRIPTOR_SIZE) {
+		printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 		dbg_hid("weird size of report descriptor (%u)\n", rsize);
 		return -EINVAL;
 	}
 
-	do {
-		ret = i2c_hid_hwreset(client);
-		if (ret)
-			msleep(1000);
-	} while (tries-- > 0 && ret);
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
-	if (ret)
-		return ret;
+	// do {
+	// 	ret = i2c_hid_hwreset(client);
+	// 	if (ret)
+	// 		msleep(1000);
+	// } while (tries-- > 0 && ret);
+
+	// if (ret)
+	// 	return ret;
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	use_override = i2c_hid_get_dmi_hid_report_desc_override(client->name,
 								&rsize);
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	if (use_override) {
 		rdesc = use_override;
 		i2c_hid_dbg(ihid, "Using a HID report descriptor override\n");
 	} else {
 		rdesc = kzalloc(rsize, GFP_KERNEL);
+
+		printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 		if (!rdesc) {
 			dbg_hid("couldn't allocate rdesc memory\n");
@@ -737,25 +755,34 @@ static int i2c_hid_parse(struct hid_device *hid)
 
 		i2c_hid_dbg(ihid, "asking HID report descriptor\n");
 
+		printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 		ret = i2c_hid_command(client, &hid_report_descr_cmd,
 				      rdesc, rsize);
 		if (ret) {
 			hid_err(hid, "reading report descriptor failed\n");
 			kfree(rdesc);
+			printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 			return -EIO;
 		}
 	}
 
 	i2c_hid_dbg(ihid, "Report Descriptor: %*ph\n", rsize, rdesc);
 
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
+
 	ret = hid_parse_report(hid, rdesc, rsize);
 	if (!use_override)
 		kfree(rdesc);
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	if (ret) {
 		dbg_hid("parsing report descriptor failed\n");
 		return ret;
 	}
+
+	printk(KERN_ERR "%s - %d\n", __func__, __LINE__);
 
 	return 0;
 }
