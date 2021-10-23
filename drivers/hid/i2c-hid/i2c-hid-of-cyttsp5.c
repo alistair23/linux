@@ -126,7 +126,7 @@ static int cyttsp5_i2c_write_read_specific(struct device *dev, u8 write_len,
 	if (!write_buf || !write_len)
 		return -EINVAL;
 
-	printk(KERN_ERR "cyttsp5: Write %*ph operation to address 0x%x", write_buf, client->addr);
+	printk(KERN_ERR "cyttsp5: Write %*ph operation to address 0x%x", write_len, write_buf, client->addr);
 
 	msgs[0].addr = client->addr;
 	msgs[0].flags = client->flags & I2C_M_TEN;
@@ -207,10 +207,6 @@ static int i2c_hid_of_cyttsp5_probe(struct i2c_client *client,
 
 	// Power up the device for the probe to work
 	i2c_hid_of_cyttsp5_power_up(&ihid_of_cyttsp5->ops);
-
-	printk(KERN_ERR "client->irq: %d / %d\n", client->irq, gpio_to_irq(14));
-
-	// enable_irq(client->irq);
 
 	cyttsp5_probe(&cyttsp5_i2c_bus_ops, &client->dev, client->irq,
 				  CY_I2C_DATA_SIZE);
