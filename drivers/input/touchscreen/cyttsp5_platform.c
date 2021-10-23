@@ -189,7 +189,6 @@ int cyttsp5_init(struct cyttsp5_core_platform_data *pdata,
 		int on, struct device *dev)
 {
 	int rst_gpio = pdata->rst_gpio;
-	int irq_gpio = pdata->irq_gpio;
 	int rc = 0;
 
 	if (on) {
@@ -208,30 +207,14 @@ int cyttsp5_init(struct cyttsp5_core_platform_data *pdata,
 				pr_err("%s: Fail set output gpio=%d\n",
 					__func__, rst_gpio);
 				gpio_free(rst_gpio);
-			} else {
-				rc = gpio_request(irq_gpio, NULL);
-				if (rc < 0) {
-					gpio_free(irq_gpio);
-					rc = gpio_request(irq_gpio,
-						NULL);
-				}
-				if (rc < 0) {
-					dev_err(dev,
-						"%s: Fail request gpio=%d\n",
-						__func__, irq_gpio);
-					gpio_free(rst_gpio);
-				} else {
-					gpio_direction_input(irq_gpio);
-				}
 			}
 		}
 	} else {
 		gpio_free(rst_gpio);
-		gpio_free(irq_gpio);
 	}
 
-	dev_info(dev, "%s: INIT CYTTSP RST gpio=%d and IRQ gpio=%d r=%d\n",
-		__func__, rst_gpio, irq_gpio, rc);
+	dev_info(dev, "%s: INIT CYTTSP RST gpio=%d r=%d\n",
+		__func__, rst_gpio, rc);
 	return rc;
 }
 
@@ -254,12 +237,6 @@ int cyttsp5_power(struct cyttsp5_core_platform_data *pdata,
 		return cyttsp5_wakeup(pdata, dev, ignore_irq);
 
 	return cyttsp5_sleep(pdata, dev, ignore_irq);
-}
-
-int cyttsp5_irq_stat(struct cyttsp5_core_platform_data *pdata,
-		struct device *dev)
-{
-	return gpio_get_value(pdata->irq_gpio);
 }
 
 #ifdef CYTTSP5_DETECT_HW

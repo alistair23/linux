@@ -555,13 +555,6 @@ static struct cyttsp5_core_platform_data *create_and_get_core_pdata(
 	}
 
 	/* Required fields */
-	pdata->irq_gpio = of_get_named_gpio(core_node, "cy,irq_gpio", 0);
-	if (!gpio_is_valid(pdata->irq_gpio)) {
-		rc = -ENODEV;
-		pr_err("Invalid irq_gpio");
-		goto fail_free;
-	}
-
 	rc = of_property_read_u32(core_node, "cy,hid_desc_register", &value);
 	if (rc)
 		goto fail_free;
@@ -609,10 +602,10 @@ static struct cyttsp5_core_platform_data *create_and_get_core_pdata(
 				touch_setting_names[i]);
 	}
 
-	printk(KERN_ERR "%s: irq_gpio:%d rst_gpio:%d\n"
+	printk(KERN_ERR "%s: rst_gpio:%d\n"
 		"hid_desc_register:%d level_irq_udelay:%d vendor_id:%d product_id:%d\n"
 		"flags:%d easy_wakeup_gesture:%d\n", __func__,
-		pdata->irq_gpio, pdata->rst_gpio,
+		pdata->rst_gpio,
 		pdata->hid_desc_register,
 		pdata->level_irq_udelay, pdata->vendor_id, pdata->product_id,
 		pdata->flags, pdata->easy_wakeup_gesture);
@@ -621,7 +614,6 @@ static struct cyttsp5_core_platform_data *create_and_get_core_pdata(
 	pdata->init = cyttsp5_init;
 	pdata->power = cyttsp5_power;
 	pdata->detect = cyttsp5_detect;
-	pdata->irq_stat = cyttsp5_irq_stat;
 
 	return pdata;
 

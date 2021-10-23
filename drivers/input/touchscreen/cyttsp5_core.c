@@ -38,6 +38,9 @@ static const char *cy_driver_core_name = CYTTSP5_CORE_NAME;
 static const char *cy_driver_core_version = CY_DRIVER_VERSION;
 static const char *cy_driver_core_date = CY_DRIVER_DATE;
 
+int cyttsp5_parse_input(struct cyttsp5_core_data *cd);
+int cyttsp5_read_input(struct cyttsp5_core_data *cd);
+
 struct cyttsp5_hid_field {
 	int report_count;
 	int report_size;
@@ -2775,8 +2778,9 @@ static int cyttsp5_get_hid_descriptor_(struct cyttsp5_core_data *cd,
 	if (IS_TMO(t)) {
 		dev_err(cd->dev, "%s: HID get descriptor timed out\n",
 			__func__);
-		rc = -ETIME;
-		goto error;
+       	rc = cyttsp5_read_input(cd);
+       	if (!rc)
+        	cyttsp5_parse_input(cd);
 	}
 
 	dev_err(cd->dev, "%s: %d\n", __func__, __LINE__);
@@ -3543,11 +3547,6 @@ static int cyttsp5_core_poweroff_device_(struct cyttsp5_core_data *cd)
 {
 	int rc;
 
-	if (cd->irq_enabled) {
-		cd->irq_enabled = false;
-		disable_irq_nosync(cd->irq);
-	}
-
 	rc = cd->cpdata->power(cd->cpdata, 0, cd->dev, 0);
 	if (rc < 0)
 		dev_err(cd->dev, "%s: HW Power down fails r=%d\n",
@@ -3802,7 +3801,7 @@ static int parse_command_input(struct cyttsp5_core_data *cd, int size)
 	return 0;
 }
 
-static int cyttsp5_parse_input(struct cyttsp5_core_data *cd)
+int cyttsp5_parse_input(struct cyttsp5_core_data *cd)
 {
 	int report_id;
 	int is_command = 0;
@@ -3860,7 +3859,7 @@ static int cyttsp5_parse_input(struct cyttsp5_core_data *cd)
 	return 0;
 }
 
-static int cyttsp5_read_input(struct cyttsp5_core_data *cd)
+int cyttsp5_read_input(struct cyttsp5_core_data *cd)
 {
 	struct device *dev = cd->dev;
 	int rc;
@@ -3893,44 +3892,6 @@ read:
 	}
 	dev_err(dev, "%s: Read input successfully\n", __func__);
 	return rc;
-}
-
-static  bool cyttsp5_check_irq_asserted(struct cyttsp5_core_data *cd)
-{
-#ifdef ENABLE_WORKAROUND_FOR_GLITCH_AFTER_BL_LAUNCH_APP
-	/* Workaround for FW defect, CDT165308
-	* bl_launch app creates a glitch in IRQ line */
-	if (cd->hid_cmd_state == HID_OUTPUT_BL_LAUNCH_APP + 1
-			&& cd->cpdata->irq_stat){
-		/*
-		in X1S panel and GC1546 panel, the width for the INT
-		glitch is about 4us,the normal INT width of response
-		will last more than 200us, so use 10us delay
-		for distinguish the glitch the normal INT is enough.
-		*/
-		udelay(10);
-		if (cd->cpdata->irq_stat(cd->cpdata, cd->dev)
-			!= CY_IRQ_ASSERTED_VALUE)
-			return false;
-	}
-#endif
-	return true;
-}
-
-
-static irqreturn_t cyttsp5_irq(int irq, void *handle)
-{
-	struct cyttsp5_core_data *cd = handle;
-	int rc;
-
-	if (!cyttsp5_check_irq_asserted(cd))
-		return IRQ_HANDLED;
-
-	rc = cyttsp5_read_input(cd);
-	if (!rc)
-		cyttsp5_parse_input(cd);
-
-	return IRQ_HANDLED;
 }
 
 int _cyttsp5_subscribe_attention(struct device *dev,
@@ -4244,11 +4205,6 @@ static int cyttsp5_core_poweron_device_(struct cyttsp5_core_data *cd)
 	if (rc < 0) {
 		dev_err(dev, "%s: HW Power up fails r=%d\n", __func__, rc);
 		goto exit;
-	}
-
-	if (!cd->irq_enabled) {
-		cd->irq_enabled = true;
-		enable_irq(cd->irq);
 	}
 
 	rc = _fast_startup(cd);
@@ -4632,14 +4588,11 @@ static int cyttsp5_core_suspend(struct device *dev)
 		 * Disable interrupt here to avoid that pending IRQ makes
 		 * the entering to low power state fail.
 		 */
-		disable_irq(cd->irq);
 	} else {
 		/*
 		 * We need it to be a wakeup source for other suspend
 		 * types than 'mem'.
 		 */
-		if (device_may_wakeup(dev))
-			enable_irq_wake(cd->irq);
 	}
 
 	return 0;
@@ -4650,12 +4603,9 @@ static int cyttsp5_core_resume(struct device *dev)
 	struct cyttsp5_core_data *cd = dev_get_drvdata(dev);
 
 	if (pm_suspend_target_state == PM_SUSPEND_MEM) {
-		enable_irq(cd->irq);
 		pinctrl_pm_select_default_state(dev);
 		cyttsp5_core_wake(cd);
 	} else {
-		if (device_may_wakeup(dev))
-			disable_irq_wake(cd->irq);
 	}
 
 	return 0;
@@ -4746,107 +4696,6 @@ static ssize_t cyttsp5_hw_reset_store(struct device *dev,
 	if (rc < 0)
 		dev_err(dev, "%s: HW reset failed r=%d\n",
 			__func__, rc);
-
-	return size;
-}
-
-/*
- * Show IRQ status via sysfs
- */
-static ssize_t cyttsp5_hw_irq_stat_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct cyttsp5_core_data *cd = dev_get_drvdata(dev);
-	int retval;
-
-	if (cd->cpdata->irq_stat) {
-		retval = cd->cpdata->irq_stat(cd->cpdata, dev);
-		switch (retval) {
-		case 0:
-			return snprintf(buf, CY_MAX_PRBUF_SIZE,
-				"Interrupt line is LOW.\n");
-		case 1:
-			return snprintf(buf, CY_MAX_PRBUF_SIZE,
-				"Interrupt line is HIGH.\n");
-		default:
-			return snprintf(buf, CY_MAX_PRBUF_SIZE,
-				"Function irq_stat() returned %d.\n", retval);
-		}
-	}
-
-	return snprintf(buf, CY_MAX_PRBUF_SIZE,
-		"Function irq_stat() undefined.\n");
-}
-
-/*
- * Show IRQ enable/disable status via sysfs
- */
-static ssize_t cyttsp5_drv_irq_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct cyttsp5_core_data *cd = dev_get_drvdata(dev);
-	ssize_t ret;
-
-	mutex_lock(&cd->system_lock);
-	if (cd->irq_enabled)
-		ret = snprintf(buf, CY_MAX_PRBUF_SIZE,
-			"Driver interrupt is ENABLED\n");
-	else
-		ret = snprintf(buf, CY_MAX_PRBUF_SIZE,
-			"Driver interrupt is DISABLED\n");
-	mutex_unlock(&cd->system_lock);
-
-	return ret;
-}
-
-/*
- * Enable/disable IRQ via sysfs
- */
-static ssize_t cyttsp5_drv_irq_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct cyttsp5_core_data *cd = dev_get_drvdata(dev);
-	unsigned long value;
-	int retval = 0;
-
-	retval = kstrtoul(buf, 10, &value);
-	if (retval < 0) {
-		dev_err(dev, "%s: Invalid value\n", __func__);
-		goto cyttsp5_drv_irq_store_error_exit;
-	}
-
-	mutex_lock(&cd->system_lock);
-	switch (value) {
-	case 0:
-		if (cd->irq_enabled) {
-			cd->irq_enabled = false;
-			/* Disable IRQ */
-			disable_irq_nosync(cd->irq);
-			dev_info(dev, "%s: Driver IRQ now disabled\n",
-				__func__);
-		} else
-			dev_info(dev, "%s: Driver IRQ already disabled\n",
-				__func__);
-		break;
-
-	case 1:
-		if (cd->irq_enabled == false) {
-			cd->irq_enabled = true;
-			/* Enable IRQ */
-			enable_irq(cd->irq);
-			dev_info(dev, "%s: Driver IRQ now enabled\n",
-				__func__);
-		} else
-			dev_info(dev, "%s: Driver IRQ already enabled\n",
-				__func__);
-		break;
-
-	default:
-		dev_err(dev, "%s: Invalid value\n", __func__);
-	}
-	mutex_unlock(&(cd->system_lock));
-
-cyttsp5_drv_irq_store_error_exit:
 
 	return size;
 }
@@ -5119,9 +4968,7 @@ static ssize_t cyttsp5_platform_data_show(struct device *dev,
 		"%s: %d\n"
 		"%s: %d\n"
 		"%s: %d\n"
-		"%s: %d\n"
 		"%s: %d\n",
-		"Interrupt GPIO", pdata->core_pdata->irq_gpio,
 		"Reset GPIO", pdata->core_pdata->rst_gpio,
 		"Level trigger delay (us)", pdata->core_pdata->level_irq_udelay,
 		"HID descriptor register", pdata->core_pdata->hid_desc_register,
@@ -5140,9 +4987,6 @@ static struct device_attribute attributes[] = {
 	__ATTR(ic_ver, S_IRUGO, cyttsp5_ic_ver_show, NULL),
 	__ATTR(drv_ver, S_IRUGO, cyttsp5_drv_ver_show, NULL),
 	__ATTR(hw_reset, S_IWUSR, NULL, cyttsp5_hw_reset_store),
-	__ATTR(hw_irq_stat, S_IRUSR, cyttsp5_hw_irq_stat_show, NULL),
-	__ATTR(drv_irq, S_IRUSR | S_IWUSR, cyttsp5_drv_irq_show,
-		cyttsp5_drv_irq_store),
 	__ATTR(drv_debug, S_IWUSR, NULL, cyttsp5_drv_debug_store),
 	__ATTR(sleep_status, S_IRUSR, cyttsp5_sleep_status_show, NULL),
 	__ATTR(easy_wakeup_gesture, S_IRUSR | S_IWUSR,
@@ -5566,35 +5410,6 @@ static void cyttsp5_setup_fb_notifier(struct cyttsp5_core_data *cd)
 }
 #endif
 
-static int cyttsp5_setup_irq_gpio(struct cyttsp5_core_data *cd)
-{
-	struct device *dev = cd->dev;
-	unsigned long irq_flags;
-	int rc;
-
-	/* Initialize IRQ */
-	cd->irq = gpio_to_irq(cd->cpdata->irq_gpio);
-	if (cd->irq < 0)
-		return -EINVAL;
-
-	cd->irq_enabled = true;
-
-	dev_dbg(dev, "%s: initialize threaded irq=%d\n", __func__, cd->irq);
-	if (cd->cpdata->level_irq_udelay > 0)
-		/* use level triggered interrupts */
-		irq_flags = IRQF_TRIGGER_LOW | IRQF_ONESHOT;
-	else
-		/* use edge triggered interrupts */
-		irq_flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
-
-	rc = request_threaded_irq(cd->irq, NULL, cyttsp5_irq, irq_flags,
-		dev_name(dev), cd);
-	if (rc < 0)
-		dev_err(dev, "%s: Error, could not request irq\n", __func__);
-
-	return rc;
-}
-
 int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 		u16 irq, size_t xfer_buf_size)
 {
@@ -5695,11 +5510,11 @@ int cyttsp5_probe(const struct cyttsp5_bus_ops *ops, struct device *dev,
 		}
 	}
 
-	rc = cyttsp5_setup_irq_gpio(cd);
-	if (rc < 0) {
-		dev_err(dev, "%s: Error, could not setup IRQ\n", __func__);
-		goto error_setup_irq;
-	}
+	// rc = cyttsp5_setup_irq_gpio(cd);
+	// if (rc < 0) {
+	// 	dev_err(dev, "%s: Error, could not setup IRQ\n", __func__);
+	// 	goto error_setup_irq;
+	// }
 
 	rc = device_init_wakeup(dev, 1);
 	if (rc < 0)
@@ -5777,8 +5592,6 @@ error_startup:
 	cancel_work_sync(&cd->startup_work);
 	cyttsp5_free_si_ptrs(cd);
 	remove_sysfs_interfaces(dev);
-error_attr_create:
-	free_irq(cd->irq, cd);
 error_setup_irq:
 error_detect:
 	if (cd->cpdata->init)
@@ -5836,7 +5649,6 @@ int cyttsp5_release(struct cyttsp5_core_data *cd)
 	debugfs_remove(cd->tthe_debugfs);
 #endif
 	remove_sysfs_interfaces(dev);
-	free_irq(cd->irq, cd);
 	if (cd->cpdata->init)
 		cd->cpdata->init(cd->cpdata, 0, dev);
 	dev_set_drvdata(dev, NULL);

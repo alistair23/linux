@@ -920,10 +920,6 @@ struct cyttsp5_core_data {
 	wait_queue_head_t wait_q;
 	enum cyttsp5_sleep_state sleep_state;
 	enum cyttsp5_startup_state startup_state;
-	int irq;
-	bool irq_enabled;
-	bool irq_wake;
-	bool irq_disabled;
 	u8 easy_wakeup_gesture;
 #ifdef EASYWAKE_TSG6
 	u8 gesture_id;
