@@ -369,17 +369,17 @@ static int cyttsp5_setup_input_device(struct device *dev)
 	max_y = max_y_tmp - 1;
 	max_p = si->sensing_conf_data.max_z;
 
+	error = input_mt_init_slots(ts->input, si->tch_abs[CY_TCH_T].max,
+		INPUT_MT_DROP_UNUSED | INPUT_MT_DIRECT);
+	if (error < 0)
+		return error;
+
 	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0, max_x, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0, max_y, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_PRESSURE, 0, max_p, 0, 0);
 
 	input_set_abs_params(ts->input, ABS_MT_TOUCH_MAJOR, 0, MAX_AREA, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_TOUCH_MINOR, 0, MAX_AREA, 0, 0);
-
-	error = input_mt_init_slots(ts->input, si->tch_abs[CY_TCH_T].max,
-		INPUT_MT_DROP_UNUSED | INPUT_MT_DIRECT);
-	if (error < 0)
-		return error;
 
 	error = input_register_device(ts->input);
 	if (error < 0)
