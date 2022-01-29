@@ -104,6 +104,12 @@
 	status = "okay";
 };
 
+&usbotg1 {
+       srp-disable;
+       hnp-disable;
+       status = "okay";
+};
+
 &usbotg2 {
 	srp-disable;
 	hnp-disable;
