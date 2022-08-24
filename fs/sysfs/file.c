@@ -391,10 +391,20 @@ int sysfs_add_file_to_group(struct kobject *kobj,
 		kernfs_get(parent);
 	}
 
-	if (!parent)
-		return -ENOENT;
-
 	kobject_get_ownership(kobj, &uid, &gid);
+	if (!parent) {
+		parent = kernfs_create_dir_ns(kobj->sd, group,
+					  S_IRWXU | S_IRUGO | S_IXUGO,
+					  uid, gid, kobj, NULL);
+		if (IS_ERR(parent)) {
+			if (PTR_ERR(parent) == -EEXIST)
+				sysfs_warn_dup(kobj->sd, group);
+			return PTR_ERR(parent);
+		}
+
+		kernfs_get(parent);
+	}
+
 	error = sysfs_add_file_mode_ns(parent, attr, attr->mode, uid, gid,
 				       NULL);
 	kernfs_put(parent);
