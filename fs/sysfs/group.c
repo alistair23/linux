@@ -31,12 +31,14 @@ static void remove_files(struct kernfs_node *parent,
 			kernfs_remove_by_name(parent, (*bin_attr)->attr.name);
 }
 
+/* returns -ERROR if error, or >= 0 for number of files actually created */
 static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 			kuid_t uid, kgid_t gid,
 			const struct attribute_group *grp, int update)
 {
 	struct attribute *const *attr;
 	struct bin_attribute *const *bin_attr;
+	int files_created = 0;
 	int error = 0, i;
 
 	if (grp->attrs) {
@@ -65,6 +67,8 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 						       gid, NULL);
 			if (unlikely(error))
 				break;
+
+			files_created++;
 		}
 		if (error) {
 			remove_files(parent, grp);
@@ -95,12 +99,15 @@ static int create_files(struct kernfs_node *parent, struct kobject *kobj,
 							   NULL);
 			if (error)
 				break;
+			files_created++;
 		}
 		if (error)
 			remove_files(parent, grp);
 	}
 exit:
-	return error;
+	if (error)
+		return error;
+	return files_created;
 }
 
 
@@ -130,9 +137,14 @@ static int internal_create_group(struct kobject *kobj, int update,
 		if (update) {
 			kn = kernfs_find_and_get(kobj->sd, grp->name);
 			if (!kn) {
-				pr_warn("Can't update unknown attr grp name: %s/%s\n",
-					kobj->name, grp->name);
-				return -EINVAL;
+				kn = kernfs_create_dir_ns(kobj->sd, grp->name,
+							  S_IRWXU | S_IRUGO | S_IXUGO,
+							  uid, gid, kobj, NULL);
+				if (IS_ERR(kn)) {
+					if (PTR_ERR(kn) == -EEXIST)
+						sysfs_warn_dup(kobj->sd, grp->name);
+					return PTR_ERR(kn);
+				}
 			}
 		} else {
 			kn = kernfs_create_dir_ns(kobj->sd, grp->name,
@@ -150,11 +162,18 @@ static int internal_create_group(struct kobject *kobj, int update,
 
 	kernfs_get(kn);
 	error = create_files(kn, kobj, uid, gid, grp, update);
-	if (error) {
+	if (error <= 0) {
+		/*
+		 * If an error happened _OR_ if no files were created in the
+		 * attribute group, and we have a name for this group, delete
+		 * the name so there's not an empty directory.
+		 */
 		if (grp->name)
 			kernfs_remove(kn);
+	} else {
+		error = 0;
+		kernfs_put(kn);
 	}
-	kernfs_put(kn);
 
 	if (grp->name && update)
 		kernfs_put(kn);
@@ -318,13 +337,12 @@ void sysfs_remove_groups(struct kobject *kobj,
 EXPORT_SYMBOL_GPL(sysfs_remove_groups);
 
 /**
- * sysfs_merge_group - merge files into a pre-existing attribute group.
+ * sysfs_merge_group - merge files into a attribute group.
  * @kobj:	The kobject containing the group.
  * @grp:	The files to create and the attribute group they belong to.
  *
- * This function returns an error if the group doesn't exist or any of the
- * files already exist in that group, in which case none of the new files
- * are created.
+ * This function returns an error if any of the files already exist in
+ * that group, in which case none of the new files are created.
  */
 int sysfs_merge_group(struct kobject *kobj,
 		       const struct attribute_group *grp)
@@ -336,11 +354,21 @@ int sysfs_merge_group(struct kobject *kobj,
 	struct attribute *const *attr;
 	int i;
 
-	parent = kernfs_find_and_get(kobj->sd, grp->name);
-	if (!parent)
-		return -ENOENT;
-
 	kobject_get_ownership(kobj, &uid, &gid);
+
+	parent = kernfs_find_and_get(kobj->sd, grp->name);
+	if (!parent) {
+		parent = kernfs_create_dir_ns(kobj->sd, grp->name,
+					  S_IRWXU | S_IRUGO | S_IXUGO,
+					  uid, gid, kobj, NULL);
+		if (IS_ERR(parent)) {
+			if (PTR_ERR(parent) == -EEXIST)
+				sysfs_warn_dup(kobj->sd, grp->name);
+			return PTR_ERR(parent);
+		}
+
+		kernfs_get(parent);
+	}
 
 	for ((i = 0, attr = grp->attrs); *attr && !error; (++i, ++attr))
 		error = sysfs_add_file_mode_ns(parent, *attr, (*attr)->mode,
