@@ -12,6 +12,7 @@
 
 #include <asm/types.h>
 #include <asm/posix_types.h>
+#include <time_types.h>
 
 struct page;
 struct kmem_cache;
