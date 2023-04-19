@@ -191,9 +191,6 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_MANUFACTURER,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
 
-	/* MAX77818 specific mode of operation (OTG supply/charger) */
-	POWER_SUPPLY_PROP_CHARGER_MODE,
-
 	/* MAX77818-charger specific property to get extended charger status indicating
 	 * which of the two charger inputs are connected
 	 */
