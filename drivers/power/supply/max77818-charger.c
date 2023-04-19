@@ -232,7 +232,6 @@ static enum power_supply_property max77818_charger_props[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
-	POWER_SUPPLY_PROP_CURRENT_MAX2,
 	POWER_SUPPLY_PROP_STATUS_EX,
 };
 
@@ -458,47 +457,6 @@ max77818_charger_set_wcin_current_limit(struct max77818_charger *chg,
 				  BIT_WCIN_ILIM, val);
 }
 
-static int max77818_charger_set_enable(struct max77818_charger *chg, int en)
-{
-	u8 mode;
-	int ret;
-
-	if(IS_ERR_OR_NULL(chg->regmap)) {
-		dev_warn(chg->dev, "unable to read from charger device\n");
-		return -ENODEV;
-	}
-
-	/* If enable = 0, just shut off charging/otg power */
-	if (!en) {
-		mode = MODE_ALL_OFF;
-		goto update_mode;
-	}
-
-	/*
-	 * Depending on configured mode, turn on charging or OTG
-	 * power.
-	 */
-	if (chg->charger_mode == POWER_SUPPLY_MODE_CHARGER) {
-		mode = MODE_CHARGER_BUCK;
-	} else if (chg->charger_mode == POWER_SUPPLY_MODE_OTG_SUPPLY) {
-		mode = MODE_OTG_BUCK_BOOST;
-	} else {
-		dev_err(chg->dev, "invalid charger_mode %d\n",
-			chg->charger_mode);
-		return -EINVAL;
-	}
-
-update_mode:
-	dev_info(chg->dev, "set MODE bits to 0x%x", mode);
-	ret = regmap_update_bits(chg->regmap, REG_CHG_CNFG_00, BIT_MODE, mode);
-	if (ret) {
-		dev_err(chg->dev, "failed to update MODE bits: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
 static int max77818_charger_get_charger_mode(struct max77818_charger *chg)
 {
 	int ret;
@@ -526,7 +484,7 @@ static int max77818_charger_get_charger_mode(struct max77818_charger *chg)
 		break;
 	default:
 		dev_warn(chg->dev,
-			 "Unknown charger_mode read from device: 0x%02x\n",
+			 "Unknown charger_mode read from device: 0x%02lx\n",
 			 (read_val & BIT_MODE));
 	}
 
@@ -777,7 +735,6 @@ static int max77818_charger_get_property(struct power_supply *psy,
 		val->intval = chg->charge_type;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_CURRENT_MAX2:
 		ret = max77818_charger_get_input_current(chg, &val->intval);
 		if (ret) {
 			ret = -ENODEV;
@@ -833,21 +790,6 @@ static int max77818_charger_set_property(struct power_supply *psy,
 			goto out;
 		}
 		break;
-	case POWER_SUPPLY_PROP_CURRENT_MAX2:
-		current_max = min(val->intval, chg->input_current_limit_wcin);
-		dev_err(chg->dev,
-			"Setting new current max for wcin interface: %d\n",
-			current_max);
-
-		ret = max77818_charger_set_wcin_current_limit(chg, current_max);
-		if (ret) {
-			dev_err(chg->dev,
-				"failed to set wcin input current: %d\n",
-				ret);
-
-			goto out;
-		}
-		break;
 	default:
 		ret = -EINVAL;
 		goto out;
@@ -864,7 +806,6 @@ static int max77818_charger_property_is_writeable(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_CURRENT_MAX2:
 		return 1;
 	default:
 		return 0;

@@ -142,7 +142,7 @@ struct max77818_chip {
 	struct power_supply *charger;
 	struct usb_phy *usb_phy[2];
 	struct notifier_block charger_detection_nb[2];
-	struct work_struct charger_detection_work[2];
+	struct work_struct charger_detection_work;
 	int status_ex;
 	int usb_safe_max_current;
 	struct work_struct initial_charger_sync_work;
@@ -1305,11 +1305,7 @@ static void max77818_do_initial_charger_sync_worker(struct work_struct *work)
 	 * ongoing event handling if called directly from here */
 	dev_err(chip->dev,
 		"Scheduling initial max current adjustment for chgin interface ");
-	schedule_work(&chip->charger_detection_work[0]);
-
-	dev_err(chip->dev,
-		"Scheduling initial max current adjustment for wcin interface ");
-	schedule_work(&chip->charger_detection_work[1]);
+	schedule_work(&chip->charger_detection_work);
 }
 
 static irqreturn_t max77818_fg_isr(int id, void *dev)
@@ -1452,7 +1448,7 @@ static void max77818_charger_detection_worker_chgin(struct work_struct *work)
 {
 	struct max77818_chip *chip = container_of(work,
 						  struct max77818_chip,
-						  charger_detection_work[0]);
+						  charger_detection_work);
 	/*
 	unsigned int min_current, max_current;
 	*/
@@ -1495,46 +1491,6 @@ static void max77818_charger_detection_worker_chgin(struct work_struct *work)
 	mutex_unlock(&chip->lock);
 }
 
-static void max77818_charger_detection_worker_wcin(struct work_struct *work)
-{
-	struct max77818_chip *chip = container_of(work,
-						  struct max77818_chip,
-						  charger_detection_work[1]);
-	unsigned int min_current, max_current;
-	union power_supply_propval val;
-	int ret;
-
-	mutex_lock(&chip->lock);
-
-	dev_err(chip->dev, "Doing charger detection work for wcin interface..\n");
-
-	if (!chip->charger) {
-		dev_err(chip->dev,
-			"Cannot access charger device, unable to set max current for wcin interface\n");
-		goto done;
-	}
-
-	dev_err(chip->dev, "Getting max/min current configured for given USB PHY (wcin)\n");
-	usb_phy_get_charger_current(chip->usb_phy[1], &min_current, &max_current);
-	if (max_current == 0)
-		val.intval = 500;
-	else
-		val.intval = max_current;
-
-	ret = MAX77818_DO_NON_FGCC_OP(
-			chip->max77818_dev,
-			power_supply_set_property(chip->charger,
-						  POWER_SUPPLY_PROP_CURRENT_MAX2,
-						  &val),
-				"Setting max wcin current through charger driver");
-	if (ret)
-		dev_err(chip->dev,
-			"Failed to set max wcin current in charger driver\n");
-
-	done:
-	mutex_unlock(&chip->lock);
-}
-
 static int max77818_charger_detection_notifier_call_chgin(struct notifier_block *nb,
 							 unsigned long val, void *v)
 {
@@ -1546,23 +1502,7 @@ static int max77818_charger_detection_notifier_call_chgin(struct notifier_block 
 		"Handling charger detection notification from chgin interface "
 		"(max current: %lu)\n", val);
 
-	schedule_work(&chip->charger_detection_work[0]);
-
-	return NOTIFY_OK;
-}
-
-static int max77818_charger_detection_notifier_call_wcin(struct notifier_block *nb,
-							 unsigned long val, void *v)
-{
-	struct max77818_chip *chip = container_of(nb,
-						  struct max77818_chip,
-						  charger_detection_nb[1]);
-
-	dev_err(chip->dev,
-		"Handling charger detection notification from wcin interface "
-		"(max current: %lu)\n", val);
-
-	schedule_work(&chip->charger_detection_work[1]);
+	schedule_work(&chip->charger_detection_work);
 
 	return NOTIFY_OK;
 }
@@ -1614,7 +1554,7 @@ static int max77818_init_charger_detection(struct max77818_chip *chip)
 	dev_err(dev,
 		"Trying to register notification handler (worker) for "
 		"chgin interface charger detection notifications \n");
-	INIT_WORK(&chip->charger_detection_work[0],
+	INIT_WORK(&chip->charger_detection_work,
 		  max77818_charger_detection_worker_chgin);
 	chip->charger_detection_nb[0].notifier_call =
 			max77818_charger_detection_notifier_call_chgin;
@@ -1625,27 +1565,7 @@ static int max77818_init_charger_detection(struct max77818_chip *chip)
 		return ret;
 	}
 
-	dev_err(dev,
-		"Trying to register notification handler (worker) for "
-		"wcin interface charger detection notifications \n");
-	INIT_WORK(&chip->charger_detection_work[1],
-		  max77818_charger_detection_worker_wcin);
-	chip->charger_detection_nb[1].notifier_call =
-			max77818_charger_detection_notifier_call_wcin;
-	ret = usb_register_notifier(chip->usb_phy[1],
-				    &chip->charger_detection_nb[1]);
-	if (ret) {
-		dev_err(dev, "usb_register_notifier failed: %d\n", ret);
-		goto unreg_usb_phy0_notifier;
-	}
-
 	return 0;
-
-unreg_usb_phy0_notifier:
-	usb_unregister_notifier(chip->usb_phy[0],
-				&chip->charger_detection_nb[0]);
-
-	return ret;
 }
 
 static int max77818_init_fg_interrupt_handling(struct max77818_dev *max77818,
