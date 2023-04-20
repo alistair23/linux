@@ -232,7 +232,6 @@ static enum power_supply_property max77818_charger_props[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
-	POWER_SUPPLY_PROP_STATUS_EX,
 };
 
 static bool max77818_charger_chgin_present(struct max77818_charger *chg)
@@ -739,19 +738,6 @@ static int max77818_charger_get_property(struct power_supply *psy,
 		if (ret) {
 			ret = -ENODEV;
 			goto out;
-		}
-		break;
-	case POWER_SUPPLY_PROP_STATUS_EX:
-		if (chg->charger_mode == POWER_SUPPLY_MODE_OTG_SUPPLY)
-			/* Charger device reports CHGIN OK in OTG mode anyway,
-			 * so just ignore this and report WCIN status only when
-			 * in OTG mode (charging is off anyway)
-			 */
-			val->intval = (max77818_charger_wcin_present(chg) << 1);
-		else {
-			chgin_connected = max77818_charger_chgin_present(chg);
-			wcin_connected = max77818_charger_wcin_present(chg);
-			val->intval = chgin_connected | (wcin_connected << 1);
 		}
 		break;
 	default:

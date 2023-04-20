@@ -138,21 +138,17 @@ struct max77818_chip {
 	struct max17042_platform_data *pdata;
 	struct work_struct init_work;
 	struct work_struct chg_isr_work;
-	bool init_complete;
 	struct power_supply *charger;
 	struct usb_phy *usb_phy[2];
 	struct notifier_block charger_detection_nb[2];
 	struct work_struct charger_detection_work;
 	int status_ex;
 	int usb_safe_max_current;
-	struct work_struct initial_charger_sync_work;
-	struct completion init_completion;
 	struct mutex lock;
 };
 
 static enum power_supply_property max77818_battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
-	POWER_SUPPLY_PROP_STATUS_EX,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
@@ -192,17 +188,6 @@ struct max77818_of_property {
 	bool skip_verify;
 	bool require_lock;
 };
-
-static void max77818_do_init_completion(struct max77818_chip *chip)
-{
-	/* Clear flag used by power supply callbacks to check
-	 * if it is safe to do property read/write */
-	SYNC_SET_FLAG(chip->init_complete, &chip->lock);
-
-	/* Signal to worker(s) waiting for initiation to be complete before
-	 * doing final steps */
-	complete(&chip->init_completion);
-}
 
 static bool max77818_do_complete_update(struct max77818_chip *chip)
 {
@@ -294,42 +279,6 @@ static int max77818_get_status(struct max77818_chip *chip, int *status)
 	return 0;
 }
 
-static void max77818_update_status_ex(struct max77818_chip *chip)
-{
-	union power_supply_propval val;
-	int ret = 0;
-
-	ret = MAX77818_DO_NON_FGCC_OP(
-			chip->max77818_dev,
-			power_supply_get_property(chip->charger,
-						  POWER_SUPPLY_PROP_STATUS_EX,
-						  &val),
-			"Requesting status_ex from charger");
-
-	if (ret) {
-		dev_err(chip->dev,
-			"Failed to read status_ex from charger, setting "
-			"status_ex = UNKNOWN\n");
-		chip->status_ex = POWER_SUPPLY_STATUS_EX_UNKNOWN;
-	}
-	else {
-		if (val.intval < (sizeof(max77818_status_ex_text)/
-				  sizeof(max77818_status_ex_text[0])))
-			dev_err(chip->dev,
-				"Setting status_ex = %s\n",
-				max77818_status_ex_text[val.intval]);
-		else
-			dev_err(chip->dev,
-				"Unknown status_ex (%d) returned\n",
-				val.intval);
-
-		chip->status_ex = val.intval;
-	}
-
-	dev_err(chip->dev, "Sending status_ex change notification\n");
-	sysfs_notify(&chip->battery->dev.kobj, NULL, "status_ex");
-}
-
 static int max77818_get_battery_health(struct max77818_chip *chip, int *health)
 {
 	int temp, vavg, vbatt, ret;
@@ -397,20 +346,11 @@ static int max77818_get_property(struct power_supply *psy,
 	u32 data;
 	u64 data64;
 
-	if (!SYNC_GET_FLAG(chip->init_complete, &chip->lock))
-		return -EAGAIN;
-
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
 		ret = max77818_get_status(chip, &val->intval);
 		if (ret < 0)
 			return ret;
-		break;
-	case POWER_SUPPLY_PROP_STATUS_EX:
-		/* status_ex is just a shadow value of the status_ex prop
-		 * reported by the charger driver, updated upon receiving
-		 * a connection change interrupt from the charger */
-		val->intval = chip->status_ex;
 		break;
 
 	case POWER_SUPPLY_PROP_PRESENT:
@@ -1247,67 +1187,6 @@ static int max77818_init_chip(struct max77818_chip *chip)
 	return 0;
 }
 
-static void max77818_do_initial_charger_sync_worker(struct work_struct *work)
-{
-	struct max77818_chip *chip =
-	    container_of(work, struct max77818_chip, initial_charger_sync_work);
-	struct max77818_dev *max77818 = chip->max77818_dev;
-	struct device *dev = max77818->dev;
-	union power_supply_propval val;
-	int ret;
-
-	/* Wait for other initiation to be completed before running these
-	 * final steps */
-	dev_err(dev, "Waiting for other initiation to complete before doing "
-		     "final charger driver sync. steps \n");
-	ret = wait_for_completion_interruptible_timeout(&chip->init_completion,
-							10 * HZ);
-	if (ret == 0) {
-		dev_err(dev, "Timeout while waiting for other init to complete, "
-			     "trying to do final charger driver sync anyway\n");
-	}
-	else {
-		dev_err(dev, "Other init completed, starting final charger "
-			     "driver sync stepd\n");
-	}
-
-	val.intval = 0;
-	ret = MAX77818_DO_NON_FGCC_OP(
-			max77818,
-			power_supply_set_property(chip->charger,
-						  POWER_SUPPLY_PROP_CURRENT_MAX,
-						  &val),
-			"Setting chgin max current\n");
-	if (ret) {
-		dev_err(dev,
-			"Failed to set max current in charger driver\n");
-	}
-
-	ret = MAX77818_DO_NON_FGCC_OP(
-			max77818,
-			power_supply_get_property(chip->charger,
-						  POWER_SUPPLY_PROP_STATUS_EX,
-						  &val),
-			"Reading initial status_ex from charger\n");
-	if (ret) {
-		dev_err(chip->dev,
-			"Failed to read status_ex from charger driver while"
-			"doing initial charger driver sync\n");
-	}
-
-	/* Do an initial max current adjustment according to max current
-	 * currently configured in USB PHY, in case this was updated before
-	 * this driver was loaded.
-	 *
-	 * As the charger detection handling is normally done i a worker,
-	 * the initial calls done here are queued on the same work queue as the
-	 * async event workers, in order to prevent conflict with possible
-	 * ongoing event handling if called directly from here */
-	dev_err(chip->dev,
-		"Scheduling initial max current adjustment for chgin interface ");
-	schedule_work(&chip->charger_detection_work);
-}
-
 static irqreturn_t max77818_fg_isr(int id, void *dev)
 {
 	struct max77818_chip *chip = dev;
@@ -1342,9 +1221,6 @@ static void max77818_charger_isr_work(struct work_struct *work)
 
 	dev_err(chip->dev, "Sending status_ex change notification\n");
 	sysfs_notify(&chip->battery->dev.kobj, NULL, "status_ex");
-
-	dev_err(chip->dev, "Reading updated connection state from charger\n");
-	max77818_update_status_ex(chip);
 }
 
 static irqreturn_t max77818_charger_connection_change_isr(int irq, void *data)
@@ -1376,8 +1252,6 @@ static void max77818_init_worker(struct work_struct *work)
 	if (ret) {
 		dev_err(chip->dev, "failed to init chip: %d\n", ret);
 	}
-
-	max77818_do_init_completion(chip);
 }
 
 static struct max17042_platform_data *
@@ -1742,7 +1616,6 @@ static int max77818_probe(struct platform_device *pdev)
 	psy_cfg.drv_data = chip;
 	psy_cfg.of_node = dev->of_node;
 
-	SYNC_CLEAR_FLAG(chip->init_complete, &chip->lock);
 	chip->battery = devm_power_supply_register(dev, &max77818_psy_desc,
 						   &psy_cfg);
 
@@ -1752,7 +1625,11 @@ static int max77818_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	dev_err(dev, "%s - %d\n", __func__, __LINE__);
+
 	max77818_init_otg_supply(chip);
+
+	dev_err(dev, "%s - %d\n", __func__, __LINE__);
 
 	ret = max77818_init_charger_detection(chip);
 	if (ret) {
@@ -1760,28 +1637,21 @@ static int max77818_probe(struct platform_device *pdev)
 		goto unreg_supply;
 	}
 
+	dev_err(dev, "%s - %d\n", __func__, __LINE__);
+
 	ret = max77818_init_fg_interrupt_handling(max77818, chip);
 	if (ret) {
 		dev_err(dev, "Failed to init FG interrupt handling\n");
 		goto unreg_chg_det;
 	}
 
+	dev_err(dev, "%s - %d\n", __func__, __LINE__);
+
 	ret = max77818_init_chg_interrupt_handling(max77818, chip);
 	if (ret) {
 		dev_err(dev, "Failed to init charger interrupt handling\n");
 		goto unreg_fg_irq;
 	}
-
-	/* A completion object is initiated in order for init to be run after
-	 * completed initiation of this driver is kept waiting until all is done
-	 * here.
-	 *
-	 * Also a worker is scheduled to run which will wait for this until
-	 * performing final charger sync. */
-	init_completion(&chip->init_completion);
-	INIT_WORK(&chip->initial_charger_sync_work,
-		  max77818_do_initial_charger_sync_worker);
-	schedule_work(&chip->initial_charger_sync_work);
 
 	/* Read the POR bit set when the device boots from a total power loss.
 	 * If this bit is set, the device is given its initial config read from
@@ -1798,19 +1668,23 @@ static int max77818_probe(struct platform_device *pdev)
 	 * a partial re-config of the custom params is performed in order to apply
 	 * only custom parameters read from updated DT. */
 	regmap_read(chip->regmap, MAX17042_STATUS, &val);
+	dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	if ((val & STATUS_POR_BIT) || max77818_do_complete_update(chip)) {
+		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 		INIT_WORK(&chip->init_work, max77818_init_worker);
 		schedule_work(&chip->init_work);
+		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	} else if (max77818_do_partial_update(chip)) {
+		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 		max77818_write_all_custom_params(chip);
-		max77818_do_init_completion(chip);
+		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	} else if (max77818_do_param_verification(chip)) {
+		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 		max77818_write_mismatched_custom_params(chip);
-		max77818_do_init_completion(chip);
+		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	}
 	else {
 		dev_err(chip->dev, "No config change\n");
-		max77818_do_init_completion(chip);
 	}
 
 	return 0;

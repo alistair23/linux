@@ -189,11 +189,6 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_MANUFACTURER,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
-
-	/* MAX77818-charger specific property to get extended charger status indicating
-	 * which of the two charger inputs are connected
-	 */
-	POWER_SUPPLY_PROP_STATUS_EX,
 };
 
 enum power_supply_type {
