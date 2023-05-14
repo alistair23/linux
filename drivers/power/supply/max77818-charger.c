@@ -244,7 +244,7 @@ static bool max77818_charger_chgin_present(struct max77818_charger *chg)
 	/* Try to read from the device first, but if the charger device
 	 * is offline, try to read the chg status gpios */
 	if(!IS_ERR_OR_NULL(chg->regmap)) {
-		dev_err(chg->dev, "Trying to read REG_CHG_INT_OK\n");
+		dev_dbg(chg->dev, "Trying to read REG_CHG_INT_OK\n");
 
 		ret = regmap_read(chg->regmap, REG_CHG_INT_OK, &chg_int_ok);
 		if (!ret) {
@@ -268,9 +268,9 @@ static bool max77818_charger_chgin_present(struct max77818_charger *chg)
 	 * Use GPIO
 	 */
 	if (chg->chgin_stat_gpio) {
-		dev_err(chg->dev, "Trying to read chgin_stat_gpio\n");
+		dev_dbg(chg->dev, "Trying to read chgin_stat_gpio\n");
 		ret = gpiod_get_value_cansleep(chg->chgin_stat_gpio);
-		dev_err(chg->dev, "ret: %d\n", ret);
+		dev_dbg(chg->dev, "ret: %d\n", ret);
 		if (ret < 0)
 			dev_err(chg->dev,
 				"failed to read chgin-stat-gpio: %d\n",
@@ -294,7 +294,7 @@ static bool max77818_charger_wcin_present(struct max77818_charger *chg)
 	/* Try to read from the device first, but if the charger device
 	 * is offline, try to read the chg status gpios */
 	if(!IS_ERR_OR_NULL(chg->regmap)) {
-		dev_err(chg->dev, "Trying to read REG_CHG_INT_OK\n");
+		dev_dbg(chg->dev, "Trying to read REG_CHG_INT_OK\n");
 
 		ret = regmap_read(chg->regmap, REG_CHG_INT_OK, &chg_int_ok);
 		if (!ret) {
@@ -318,9 +318,9 @@ static bool max77818_charger_wcin_present(struct max77818_charger *chg)
 	 * Use GPIO
 	 */
 	if (chg->wcin_stat_gpio) {
-		dev_err(chg->dev, "Trying to read wcin_stat_gpio\n");
+		dev_dbg(chg->dev, "Trying to read wcin_stat_gpio\n");
 		ret = gpiod_get_value_cansleep(chg->wcin_stat_gpio);
-		dev_err(chg->dev, "ret: %d\n", ret);
+		dev_dbg(chg->dev, "ret: %d\n", ret);
 
 		if (ret < 0)
 			dev_err(chg->dev,
@@ -426,7 +426,7 @@ max77818_charger_set_chgin_current_limit(struct max77818_charger *chg,
 			val |= quotient * 3;
 	}
 
-	dev_err(chg->dev, "Setting CHGIN_ILIM=0x%02x\n", val);
+	dev_dbg(chg->dev, "Setting CHGIN_ILIM=0x%02x\n", val);
 	return regmap_update_bits(chg->regmap, REG_CHG_CNFG_09,
 				  BIT_CHGIN_ILIM, val);
 }
@@ -451,7 +451,7 @@ max77818_charger_set_wcin_current_limit(struct max77818_charger *chg,
 		val = DIV_ROUND_UP(input_current - 60, 20) + 3;
 	}
 
-	dev_err(chg->dev, "Setting WCIN_ILIM=0x%02x\n", val);
+	dev_dbg(chg->dev, "Setting WCIN_ILIM=0x%02x\n", val);
 	return regmap_update_bits(chg->regmap, REG_CHG_CNFG_10,
 				  BIT_WCIN_ILIM, val);
 }
@@ -461,14 +461,14 @@ static int max77818_charger_get_charger_mode(struct max77818_charger *chg)
 	int ret;
 	u32 read_val;
 
-	dev_err(chg->dev, "Trying to read current charger mode from device\n");
+	dev_dbg(chg->dev, "Trying to read current charger mode from device\n");
 
 	ret = regmap_read(chg->regmap, REG_CHG_CNFG_00, &read_val);
 	if (ret) {
 		return ret;
 	}
-	dev_err(chg->dev, "Read raw charger_mode register: 0x%02x\n", read_val);
-	dev_err(chg->dev, "Read charger_mode 0x%02lx\n", (read_val & BIT_MODE));
+	dev_dbg(chg->dev, "Read raw charger_mode register: 0x%02x\n", read_val);
+	dev_dbg(chg->dev, "Read charger_mode 0x%02lx\n", (read_val & BIT_MODE));
 
 	switch(read_val & BIT_MODE)
 	{
@@ -668,7 +668,7 @@ static void max77818_charger_update(struct max77818_charger *chg)
 	}
 
 	if(!IS_ERR_OR_NULL(chg->regmap)) {
-		dev_err(chg->dev, "Trying to read CHG_DTLS_01\n");
+		dev_dbg(chg->dev, "Trying to read CHG_DTLS_01\n");
 
 		ret = regmap_read(chg->regmap, REG_CHG_DTLS_01, &dtls_01);
 		if (!ret) {
@@ -763,7 +763,7 @@ static int max77818_charger_set_property(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		current_max = min(val->intval, chg->input_current_limit_chgin);
-		dev_err(chg->dev,
+		dev_dbg(chg->dev,
 			"Setting new current max for chgin interface: %d\n",
 			current_max);
 
@@ -857,7 +857,7 @@ static int max77818_charger_parse_dt(struct max77818_charger *chg)
 	}
 	else {
 		chg->chgin_stat_gpio = gdp;
-		dev_err(chg->dev,
+		dev_dbg(chg->dev,
 			"chgin connection status gpio registered (gpio %d)\n",
 			desc_to_gpio(chg->chgin_stat_gpio));
 	}
@@ -876,7 +876,7 @@ static int max77818_charger_parse_dt(struct max77818_charger *chg)
 	}
 	else {
 		chg->wcin_stat_gpio = gdp;
-		dev_err(chg->dev,
+		dev_dbg(chg->dev,
 			"wcin connection status gpio registered (gpio %d)\n",
 			desc_to_gpio(chg->wcin_stat_gpio));
 	}
@@ -942,7 +942,7 @@ static int max77818_charger_probe(struct platform_device *pdev)
 static int max77818_charger_suspend(struct device *dev)
 {
 	if (pm_suspend_target_state == PM_SUSPEND_MEM) {
-		dev_err(dev->parent, "Selecting sleep pinctrl state\n");
+		dev_dbg(dev->parent, "Selecting sleep pinctrl state\n");
 		pinctrl_pm_select_sleep_state(dev->parent);
 	}
 
@@ -952,7 +952,7 @@ static int max77818_charger_suspend(struct device *dev)
 static int max77818_charger_resume(struct device *dev)
 {
 	if (pm_suspend_target_state == PM_SUSPEND_MEM) {
-		dev_err(dev->parent, "Selecting default pinctrl state\n");
+		dev_dbg(dev->parent, "Selecting default pinctrl state\n");
 		pinctrl_pm_select_default_state(dev->parent);
 	}
 

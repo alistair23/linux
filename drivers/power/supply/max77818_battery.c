@@ -142,7 +142,6 @@ struct max77818_chip {
 	struct usb_phy *usb_phy[2];
 	struct notifier_block charger_detection_nb[2];
 	struct work_struct charger_detection_work;
-	int status_ex;
 	int usb_safe_max_current;
 	struct mutex lock;
 };
@@ -174,11 +173,6 @@ static enum power_supply_property max77818_battery_props[] = {
 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
 };
 
-static const char * const max77818_status_ex_text[] = {
-	"Charger not connected", "POGO connected", "USB-C connected",
-	"POGO/USB-C connected", "Changing", "Unknown"
-};
-
 struct max77818_of_property {
 	const char *property_name;
 	u8 register_addr;
@@ -192,7 +186,7 @@ struct max77818_of_property {
 static bool max77818_do_complete_update(struct max77818_chip *chip)
 {
 	if (strncmp(config_update_param, "complete", 8) == 0) {
-		dev_err(chip->dev, "config_update='complete'\n");
+		dev_dbg(chip->dev, "config_update='complete'\n");
 		return true;
 	}
 	else {
@@ -203,7 +197,7 @@ static bool max77818_do_complete_update(struct max77818_chip *chip)
 static bool max77818_do_partial_update(struct max77818_chip *chip)
 {
 	if (strncmp(config_update_param, "partial", 7) == 0) {
-		dev_err(chip->dev, "config_update='partial'\n");
+		dev_dbg(chip->dev, "config_update='partial'\n");
 		return true;
 	}
 	else {
@@ -214,7 +208,7 @@ static bool max77818_do_partial_update(struct max77818_chip *chip)
 static bool max77818_do_param_verification(struct max77818_chip *chip)
 {
 	if (strncmp(config_update_param, "verify", 6) == 0) {
-		dev_err(chip->dev, "config_update='verify'\n");
+		dev_dbg(chip->dev, "config_update='verify'\n");
 		return true;
 	}
 	else {
@@ -865,13 +859,13 @@ static int max77818_write_of_param_if_mismatch(struct max77818_chip *chip,
 
 	ret = max77818_read_of_property(chip, prop->property_name, &read_param);
 	if(!ret) {
-		dev_err(chip->dev, "Verifying '%s' (reg 0x%02x) = 0x%04x\n",
+		dev_dbg(chip->dev, "Verifying '%s' (reg 0x%02x) = 0x%04x\n",
 			prop->property_name,
 			prop->register_addr,
 			read_param);
 
 		if (prop->require_lock) {
-			dev_err(chip->dev, "Applying lock\n");
+			dev_dbg(chip->dev, "Applying lock\n");
 			mutex_lock(&chip->max77818_dev->lock);
 		}
 
@@ -887,7 +881,7 @@ static int max77818_write_of_param_if_mismatch(struct max77818_chip *chip,
 		}
 
 		if ((read_param != read_cur_value) || param_mismatch) {
-			dev_err(chip->dev,
+			dev_dbg(chip->dev,
 				"Read '%s' (reg 0x%02x) = 0x%04x from device, "
 				"expected 0x%04x\n",
 				prop->property_name,
@@ -898,7 +892,7 @@ static int max77818_write_of_param_if_mismatch(struct max77818_chip *chip,
 		}
 
 		if (param_mismatch) {
-			dev_err(chip->dev, "Writing '%s' (reg 0x%02x): 0x%04x\n",
+			dev_dbg(chip->dev, "Writing '%s' (reg 0x%02x): 0x%04x\n",
 				prop->property_name,
 				prop->register_addr,
 				read_param);
@@ -915,7 +909,7 @@ static int max77818_write_of_param_if_mismatch(struct max77818_chip *chip,
 		}
 
 		if (prop->require_lock) {
-			dev_err(chip->dev, "Releasing lock\n");
+			dev_dbg(chip->dev, "Releasing lock\n");
 			mutex_unlock(&chip->max77818_dev->lock);
 		}
 	}
@@ -939,13 +933,13 @@ static int  max77818_read_of_param_and_write(struct max77818_chip *chip,
 
 	ret = max77818_read_of_property(chip, prop->property_name, &read_param);
 	if (!ret) {
-		dev_err(chip->dev, "Writing '%s' (reg 0x%02x): 0x%04x\n",
+		dev_dbg(chip->dev, "Writing '%s' (reg 0x%02x): 0x%04x\n",
 			prop->property_name,
 			prop->register_addr,
 			read_param);
 
 		if (prop->require_lock) {
-			dev_err(chip->dev, "Applying lock\n");
+			dev_dbg(chip->dev, "Applying lock\n");
 			mutex_lock(&chip->max77818_dev->lock);
 		}
 
@@ -959,7 +953,7 @@ static int  max77818_read_of_param_and_write(struct max77818_chip *chip,
 		}
 
 		if (prop->require_lock) {
-			dev_err(chip->dev, "Releasing lock\n");
+			dev_dbg(chip->dev, "Releasing lock\n");
 			mutex_unlock(&chip->max77818_dev->lock);
 		}
 	}
@@ -1078,10 +1072,10 @@ static bool max77818_write_mismatched_custom_params(struct max77818_chip *chip)
 	int ret;
 	bool is_success = true;
 
-	dev_err(chip->dev, "Verifying custom params\n");
+	dev_dbg(chip->dev, "Verifying custom params\n");
 
 	if (max77818_relax_cfg.skip_verify) {
-		dev_err(chip->dev,
+		dev_dbg(chip->dev,
 			"Skipping verify/write for register '%s'\n",
 			max77818_relax_cfg.property_name);
 	}
@@ -1097,7 +1091,7 @@ static bool max77818_write_mismatched_custom_params(struct max77818_chip *chip)
 
 	for(i = 0; i < ARRAY_SIZE(max77818_custom_param_list); i++) {
 		if (max77818_custom_param_list[i].skip_verify) {
-			dev_err(chip->dev,
+			dev_dbg(chip->dev,
 				"Skipping verify/write for register '%s'\n",
 				max77818_custom_param_list[i].property_name);
 			continue;
@@ -1120,7 +1114,7 @@ static bool max77818_write_all_custom_params(struct max77818_chip *chip)
 	int ret, i;
 	bool is_success = true;
 
-	dev_err(chip->dev, "Writing custom params\n");
+	dev_dbg(chip->dev, "Writing custom params\n");
 
 	ret = regmap_write(map, MAX17042_RepCap, 0);
 	if (ret) {
@@ -1216,10 +1210,7 @@ static void max77818_charger_isr_work(struct work_struct *work)
 	struct max77818_chip *chip =
 		container_of(work, struct max77818_chip, chg_isr_work);
 
-	dev_err(chip->dev, "Changing status_ex -> CHANGING\n");
-	chip->status_ex = POWER_SUPPLY_STATUS_EX_CHANGING;
-
-	dev_err(chip->dev, "Sending status_ex change notification\n");
+	dev_dbg(chip->dev, "Sending status_ex change notification\n");
 	sysfs_notify(&chip->battery->dev.kobj, NULL, "status_ex");
 }
 
@@ -1247,7 +1238,7 @@ static void max77818_init_worker(struct work_struct *work)
 						  init_work);
 	int ret;
 
-	dev_err(chip->dev, "Doing complete re-config\n");
+	dev_dbg(chip->dev, "Doing complete re-config\n");
 	ret = max77818_init_chip(chip);
 	if (ret) {
 		dev_err(chip->dev, "failed to init chip: %d\n", ret);
@@ -1294,7 +1285,7 @@ static void max77818_get_driver_config(struct max77818_chip *chip)
 		chip->usb_safe_max_current = 100;
 	}
 	else {
-		dev_err(chip->dev,
+		dev_dbg(chip->dev,
 			"Read usb_safe_max_current: %d\n",
 			read_value);
 		chip->usb_safe_max_current = read_value;
@@ -1332,7 +1323,7 @@ static void max77818_charger_detection_worker_chgin(struct work_struct *work)
 
 	mutex_lock(&chip->lock);
 
-	dev_err(chip->dev, "Doing charger detection work for chgin interface..\n");
+	dev_dbg(chip->dev, "Doing charger detection work for chgin interface..\n");
 
 	if (!chip->charger) {
 		dev_err(chip->dev,
@@ -1341,7 +1332,7 @@ static void max77818_charger_detection_worker_chgin(struct work_struct *work)
 	}
 
 	/*
-	dev_err(chip->dev, "Getting max/min current configured for given USB PHY\n");
+	dev_dbg(chip->dev, "Getting max/min current configured for given USB PHY\n");
 	usb_phy_get_charger_current(chip->usb_phy[0], &min_current, &max_current);
 	if (max_current == 0)
 		val.intval = chip->usb_safe_max_current;
@@ -1372,7 +1363,7 @@ static int max77818_charger_detection_notifier_call_chgin(struct notifier_block 
 						  struct max77818_chip,
 						  charger_detection_nb[0]);
 
-	dev_err(chip->dev,
+	dev_dbg(chip->dev,
 		"Handling charger detection notification from chgin interface "
 		"(max current: %lu)\n", val);
 
@@ -1385,7 +1376,7 @@ static int max77818_init_otg_supply(struct max77818_chip *chip)
 {
 	struct device *dev = chip->dev;
 
-	dev_err(dev, "Trying to reference charger (expecting charger as"
+	dev_dbg(dev, "Trying to reference charger (expecting charger as"
 		     "first supply in given list of supplies)\n");
 	if (chip->battery->num_supplies > 0) {
 		chip->charger = power_supply_get_by_name(
@@ -1405,7 +1396,7 @@ static int max77818_init_charger_detection(struct max77818_chip *chip)
 	struct device *dev = chip->dev;
 	int ret;
 
-	dev_err(dev,
+	dev_dbg(dev,
 		"Trying to reference usb-phy1 (for receiving charger "
 		"detection notifications for chgin interface\n");
 	chip->usb_phy[0]= devm_usb_get_phy_by_phandle(dev, "usb-phy1", 0);
@@ -1415,7 +1406,7 @@ static int max77818_init_charger_detection(struct max77818_chip *chip)
 		return ret;
 	}
 
-	dev_err(dev,
+	dev_dbg(dev,
 		"Trying to reference usb-phy2 (for receiving charger "
 		"detection notifications for wcin interface\n");
 	chip->usb_phy[1]= devm_usb_get_phy_by_phandle(dev, "usb-phy2", 0);
@@ -1425,7 +1416,7 @@ static int max77818_init_charger_detection(struct max77818_chip *chip)
 		return ret;
 	}
 
-	dev_err(dev,
+	dev_dbg(dev,
 		"Trying to register notification handler (worker) for "
 		"chgin interface charger detection notifications \n");
 	INIT_WORK(&chip->charger_detection_work,
@@ -1521,7 +1512,7 @@ static int max77818_init_chg_interrupt_handling(struct max77818_dev *max77818,
 		ret = -ENODEV;
 		goto free_chg_irq;
 	}
-	dev_err(dev, "chgin irq: %d\n", chip->chg_chgin_irq);
+	dev_dbg(dev, "chgin irq: %d\n", chip->chg_chgin_irq);
 
 	ret = devm_request_threaded_irq(dev, chip->chg_chgin_irq, NULL,
 					max77818_charger_connection_change_isr,
@@ -1539,7 +1530,7 @@ static int max77818_init_chg_interrupt_handling(struct max77818_dev *max77818,
 		ret = -ENODEV;
 		goto free_chgin_irq;
 	}
-	dev_err(dev, "wcin irq: %d\n", chip->chg_wcin_irq);
+	dev_dbg(dev, "wcin irq: %d\n", chip->chg_wcin_irq);
 
 	ret = devm_request_threaded_irq(dev, chip->chg_wcin_irq, NULL,
 					max77818_charger_connection_change_isr,
@@ -1625,11 +1616,7 @@ static int max77818_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	dev_err(dev, "%s - %d\n", __func__, __LINE__);
-
 	max77818_init_otg_supply(chip);
-
-	dev_err(dev, "%s - %d\n", __func__, __LINE__);
 
 	ret = max77818_init_charger_detection(chip);
 	if (ret) {
@@ -1637,15 +1624,11 @@ static int max77818_probe(struct platform_device *pdev)
 		goto unreg_supply;
 	}
 
-	dev_err(dev, "%s - %d\n", __func__, __LINE__);
-
 	ret = max77818_init_fg_interrupt_handling(max77818, chip);
 	if (ret) {
 		dev_err(dev, "Failed to init FG interrupt handling\n");
 		goto unreg_chg_det;
 	}
-
-	dev_err(dev, "%s - %d\n", __func__, __LINE__);
 
 	ret = max77818_init_chg_interrupt_handling(max77818, chip);
 	if (ret) {
@@ -1668,23 +1651,16 @@ static int max77818_probe(struct platform_device *pdev)
 	 * a partial re-config of the custom params is performed in order to apply
 	 * only custom parameters read from updated DT. */
 	regmap_read(chip->regmap, MAX17042_STATUS, &val);
-	dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	if ((val & STATUS_POR_BIT) || max77818_do_complete_update(chip)) {
-		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 		INIT_WORK(&chip->init_work, max77818_init_worker);
 		schedule_work(&chip->init_work);
-		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	} else if (max77818_do_partial_update(chip)) {
-		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 		max77818_write_all_custom_params(chip);
-		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	} else if (max77818_do_param_verification(chip)) {
-		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 		max77818_write_mismatched_custom_params(chip);
-		dev_err(dev, "%s - %d\n", __func__, __LINE__);
 	}
 	else {
-		dev_err(chip->dev, "No config change\n");
+		dev_dbg(chip->dev, "No config change\n");
 	}
 
 	return 0;
