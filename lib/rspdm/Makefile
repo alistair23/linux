@@ -8,3 +8,4 @@
 obj-$(CONFIG_RSPDM) += spdm.o
 
 spdm-y := lib.o
+spdm-$(CONFIG_SYSFS) += req-sysfs.o
