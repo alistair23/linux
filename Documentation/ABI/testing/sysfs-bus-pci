@@ -500,3 +500,15 @@ Description:
 		console drivers from the device.  Raw users of pci-sysfs
 		resourceN attributes must be terminated prior to resizing.
 		Success of the resizing operation is not guaranteed.
+
+What:		/sys/bus/pci/devices/.../doe_features
+Date:		August 2023
+Contact:	Linux PCI developers <linux-pci@vger.kernel.org>
+Description:
+		This directory contains a list of the supported
+		Data Object Exchange (DOE) features. The feature values are in
+		the file name. The contents of each file are the same as the
+		name.
+		The value comes from the device and specifies the vendor and
+		data object type supported. The lower byte is the data object
+		type and the next two bytes are the vendor ID.
