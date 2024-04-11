@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
+
+name: spdm
+
+doc: |
+  DMTF Security Protocol and Data Model (SPDM)
+  https://www.dmtf.org/dsp/DSP0274
+
+protocol: genetlink
+
+uapi-header: linux/spdm_netlink.h
+
+definitions:
+  -
+    type: enum
+    name: spdm-reqrsp-code
+    doc: SPDM request or response code of a signed message (SPDM 1.0.0 table 4)
+    entries:
+      -
+        name: challenge-auth
+      -
+        name: endpoint-info
+      -
+        name: measurements
+      -
+        name: key-exchange-rsp
+      -
+        name: finish
+    header: uapi/linux/spdm.h
+  -
+    type: enum
+    name: hash-algo
+    doc: SPDM-supported hash algorithm (SPDM 1.0.0 table 13)
+    entries:
+      -
+        name: sha256
+      -
+        name: sha384
+      -
+        name: sha512
+      -
+        name: sha3-256
+      -
+        name: sha3-384
+      -
+        name: sha3-512
+    header: uapi/linux/hash_info.h
+
+attribute-sets:
+  -
+    name: sig
+    doc: |
+      Signature received from a device, together with all ancillary data
+      needed for re-verification.
+
+      Meant for remote attestation services which do not trust the kernel
+      to have verified the signature correctly or which want to apply
+      policy constraints of their own.
+    attributes:
+      -
+        name: device
+        doc: |
+          Path under sysfs of the device generating the signature.
+        type: string
+      -
+        name: rsp-code
+        doc: |
+          SPDM response code of the message containing the signature,
+          to determine what kind of event caused signature generation.
+          Equivalent to the "context" string of SPDM 1.2.0 sec 15,
+          but represented numerically for easier parsing.
+        type: u8
+        enum: spdm-reqrsp-code
+      -
+        name: slot
+        doc: |
+          Certificate slot used for signature generation.  Note that
+          if the slot has since been provisioned with a different
+          certificate chain, re-verification of the signature will fail.
+        type: u8
+      -
+        name: hash-algo
+        doc: |
+          Hash algorithm used for signature generation.
+        type: u16
+        enum: hash-algo
+      -
+        name: sig-offset
+        doc: |
+          Offset of signature in @transcript.  The signature is located
+          at the end of @transcript, hence its size equals @transcript
+          size minus this offset.
+        type: u32
+      -
+        name: req-nonce-offset
+        doc: |
+          Offset of 32 byte nonce chosen by requester in @transcript.
+          Allows remote attestation services to verify freshness
+          (uniqueness) and entropy adequacy of the nonce.
+        type: u32
+      -
+        name: rsp-nonce-offset
+        doc: |
+          Offset of 32 byte nonce chosen by responder in @transcript.
+          Allows remote attestation services to verify freshness
+          (uniqueness) and entropy adequacy of the nonce.
+        type: u32
+      -
+        name: combined-spdm-prefix
+        doc: |
+          Only included in the message with SPDM version 1.2.0 or newer.
+        type: binary
+        checks:
+          exact-len: 100
+      -
+        name: transcript
+        type: binary
+        multi-attr: true
+
+operations:
+  list:
+    -
+      name: sig
+      doc: Signature event
+      attribute-set: sig
+      event:
+        attributes:
+          - sig
+      mcgrp: sig
+
+mcast-groups:
+  list:
+    -
+      name: sig
+
+kernel-family:
+  headers: [ "netlink-autogen.h"]
