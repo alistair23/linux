@@ -19,6 +19,7 @@ use kernel::{
         to_result,
         Error, //
     },
+    page::PAGE_SIZE,
     str::CStr,
     str::CString,
     validate::Untrusted,
@@ -1063,6 +1064,70 @@ impl SpdmState {
                     self.authenticated = false;
                 }
             };
+        }
+
+        let spdm_context = b"responder-challenge_auth signing\0";
+
+        let hash_digest_size = if self.base_hash_alg < bindings::hash_algo_HASH_ALGO__LAST {
+            // SAFETY: `base_hash_alg` is a valid offset into `hash_digest_size`
+            (unsafe { bindings::get_hash_digest_size(self.base_hash_alg) }) as usize
+        } else {
+            to_result(-(bindings::EIO as i32))?;
+            0
+        };
+
+        let req_nonce_off = self.transcript.len() + core::mem::offset_of!(ChallengeReq, nonce);
+        let rsp_nonce_off =
+            self.transcript.len() + core::mem::size_of::<ChallengeRsp>() + hash_digest_size;
+
+        // This is the actual transcript length
+        let transcript_len = self.transcript.len();
+
+        // This is how much extra capacity we need to page align the transcript buffer
+        let extra_cap = PAGE_SIZE - transcript_len.rem_euclid(PAGE_SIZE);
+        // Ensure we have the capacity
+        self.transcript.reserve(extra_cap, GFP_KERNEL)?;
+
+        // We know the buffer is this long and this value will be PAGE_SIZE aligned
+        let transcript_buf_len = transcript_len + extra_cap;
+
+        let mut atrifacts = bindings::spdm_artifacts {
+            version: self.version,
+            base_hash_alg: self.base_hash_alg,
+            base_asym_alg: self.base_asym_alg,
+            transcript: self.transcript.as_ptr() as *const c_void,
+            transcript_len: transcript_buf_len,
+            sig_len: self.sig_len,
+            provisioned_slots: self.provisioned_slots,
+            base_asym_enc: self.base_asym_enc.as_char_ptr(),
+            cert_chain: [core::ptr::null_mut(); SPDM_SLOTS],
+            cert_chain_len: [0; SPDM_SLOTS],
+            leaf_key: core::ptr::null_mut(),
+        };
+
+        for i in 0..SPDM_SLOTS {
+            let cert_chain_len = self.certs[i].len();
+
+            if cert_chain_len > 0 {
+                atrifacts.cert_chain[i] = self.certs[i].as_ptr() as *const c_void;
+                atrifacts.cert_chain_len[i] = cert_chain_len;
+            }
+        }
+        atrifacts.leaf_key = match self.leaf_key {
+            Some(key) => key,
+            None => core::ptr::null_mut(),
+        };
+
+        unsafe {
+            bindings::spdm_netlink_sig_event(
+                self.dev,
+                atrifacts,
+                0x03,
+                slot,
+                req_nonce_off,
+                rsp_nonce_off,
+                spdm_context as *const _ as *const u8,
+            );
         }
 
         Ok(())

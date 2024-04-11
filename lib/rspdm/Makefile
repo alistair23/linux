@@ -8,4 +8,5 @@
 obj-$(CONFIG_RSPDM) += spdm.o
 
 spdm-y := lib.o
+spdm-$(CONFIG_NET) += req-netlink.o netlink-autogen.o
 spdm-$(CONFIG_SYSFS) += req-sysfs.o
