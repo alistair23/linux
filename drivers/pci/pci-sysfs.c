@@ -1670,6 +1670,7 @@ const struct attribute_group *pci_dev_attr_groups[] = {
 #ifdef CONFIG_PCI_CMA
 	&spdm_attr_group,
 	&spdm_certificates_group,
+	&spdm_signatures_group,
 #endif
 	NULL,
 };
