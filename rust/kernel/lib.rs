@@ -83,6 +83,7 @@ pub mod tracepoint;
 pub mod transmute;
 pub mod types;
 pub mod uaccess;
+pub mod validate;
 pub mod workqueue;
 
 #[doc(hidden)]
