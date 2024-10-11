@@ -128,7 +128,7 @@ config PCI_CMA
 	select CRYPTO_SHA256
 	select CRYPTO_SHA512
 	select PCI_DOE
-	select SPDM
+	depends on SPDM
 	help
 	  Authenticate devices on enumeration per PCIe r6.2 sec 6.31.
 	  A PCI DOE mailbox is used as transport for DMTF SPDM based
