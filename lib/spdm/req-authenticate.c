@@ -18,7 +18,7 @@
 #include <linux/key.h>
 #include <linux/random.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <crypto/hash.h>
 #include <crypto/hash_info.h>
 #include <keys/asymmetric-type.h>
