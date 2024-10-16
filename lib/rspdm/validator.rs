@@ -6,6 +6,7 @@
 //!
 //! Copyright (C) 2024 Western Digital
 
+use crate::bindings::{__IncompleteArrayField, __le16};
 use crate::consts::SpdmErrorCode;
 use core::mem;
 use kernel::prelude::*;
@@ -62,4 +63,57 @@ pub(crate) struct SpdmErrorRsp {
     pub(crate) code: u8,
     pub(crate) error_code: SpdmErrorCode,
     pub(crate) error_data: u8,
+}
+
+#[repr(C, packed)]
+pub(crate) struct GetVersionReq {
+    pub(crate) version: u8,
+    pub(crate) code: u8,
+    pub(crate) param1: u8,
+    pub(crate) param2: u8,
+}
+
+#[repr(C, packed)]
+pub(crate) struct GetVersionRsp {
+    pub(crate) version: u8,
+    pub(crate) code: u8,
+    param1: u8,
+    param2: u8,
+    reserved: u8,
+    pub(crate) version_number_entry_count: u8,
+    pub(crate) version_number_entries: __IncompleteArrayField<__le16>,
+}
+
+impl Validate<&mut Unvalidated<Vec<u8>>> for &mut GetVersionRsp {
+    type Err = Error;
+
+    fn validate(unvalidated: &mut Unvalidated<Vec<u8>>) -> Result<Self, Self::Err> {
+        let raw = unvalidated.raw_mut();
+        if raw.len() < mem::size_of::<GetVersionRsp>() {
+            return Err(EINVAL);
+        }
+
+        let version_number_entries = *(raw.get(5).ok_or(ENOMEM))? as usize;
+        let total_expected_size = version_number_entries * 2 + 6;
+        if raw.len() < total_expected_size {
+            return Err(EINVAL);
+        }
+
+        let ptr = raw.as_mut_ptr();
+        // CAST: `GetVersionRsp` only contains integers and has `repr(C)`.
+        let ptr = ptr.cast::<GetVersionRsp>();
+        // SAFETY: `ptr` came from a reference and the cast above is valid.
+        let rsp: &mut GetVersionRsp = unsafe { &mut *ptr };
+
+        // Creating a reference on a packed stuct will result in
+        // undefined behaviour, so we operate on the raw data directly
+        let unaligned = core::ptr::addr_of_mut!(rsp.version_number_entries) as *mut u16;
+        for version_offset in 0..version_number_entries {
+            let addr = unaligned.wrapping_add(version_offset);
+            let version = unsafe { core::ptr::read_unaligned::<u16>(addr) };
+            unsafe { core::ptr::write_unaligned::<u16>(addr, version.to_le()) }
+        }
+
+        Ok(rsp)
+    }
 }
