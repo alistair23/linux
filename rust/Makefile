@@ -270,7 +270,9 @@ bindgen_c_flags_final = $(bindgen_c_flags_lto) -D__BINDGEN__
 
 bindgen_static_functions = --experimental --wrap-static-fns \
 	--blocklist-type '.*' \
-	--allowlist-function crypto_shash_descsize
+	--allowlist-function crypto_shash_descsize \
+	--allowlist-function crypto_shash_init \
+	--allowlist-function crypto_shash_digestsize
 
 quiet_cmd_bindgen = BINDGEN $@
       cmd_bindgen = \
