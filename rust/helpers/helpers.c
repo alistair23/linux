@@ -20,7 +20,6 @@
 #include "platform.c"
 #include "pci.c"
 #include "pid_namespace.c"
-#include "rbtree.c"
 #include "rcu.c"
 #include "refcount.c"
 #include "security.c"
