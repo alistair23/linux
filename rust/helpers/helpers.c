@@ -12,7 +12,6 @@
 #include "build_bug.c"
 #include "cred.c"
 #include "device.c"
-#include "err.c"
 #include "fs.c"
 #include "io.c"
 #include "jump_label.c"
