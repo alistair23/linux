@@ -18,7 +18,6 @@
 #include "pid_namespace.c"
 #include "refcount.c"
 #include "security.c"
-#include "signal.c"
 #include "slab.c"
 #include "spinlock.c"
 #include "task.c"
