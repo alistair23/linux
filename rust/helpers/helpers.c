@@ -13,7 +13,6 @@
 #include "cred.c"
 #include "fs.c"
 #include "jump_label.c"
-#include "kunit.c"
 #include "mutex.c"
 #include "page.c"
 #include "pid_namespace.c"
