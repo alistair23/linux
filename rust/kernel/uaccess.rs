@@ -472,7 +472,11 @@ impl UserSliceWriter {
         }
         // SAFETY: `data_ptr` points into an immutable slice of length `len`, so we may read
         // that many bytes from it.
+<<<<<<< HEAD
         let res = unsafe { bindings::copy_to_user(self.ptr.as_mut_ptr(), data_ptr, len) };
+=======
+        let res = unsafe { bindings::copy_to_user(self.ptr as *mut c_void, data_ptr, len as u64) };
+>>>>>>> 4f6172b612b9 (rust: helpers: Remove uaccess helpers)
         if res != 0 {
             return Err(EFAULT);
         }
