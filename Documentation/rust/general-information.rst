@@ -119,10 +119,12 @@ By including a C header from ``include/`` into
 bindings for the included subsystem. After building, see the ``*_generated.rs``
 output files in the ``rust/bindings/`` directory.
 
-For parts of the C header that ``bindgen`` does not auto generate, e.g. C
-``inline`` functions or non-trivial macros, it is acceptable to add a small
-wrapper function to ``rust/helpers/`` to make it available for the Rust side as
-well.
+C ``inline`` functions will only be generated if the function name is
+specified in ``rust/bindgen_static_functions``.
+
+For parts of the C header that ``bindgen`` does not auto generate, e.g.
+non-trivial macros, it is acceptable to add a small wrapper function
+to ``rust/helpers/`` to make it available for the Rust side as well.
 
 Abstractions
 ~~~~~~~~~~~~
