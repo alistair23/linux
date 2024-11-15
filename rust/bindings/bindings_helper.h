@@ -32,6 +32,8 @@
 #include <linux/security.h>
 #include <linux/slab.h>
 #include <linux/tracepoint.h>
+#include <linux/spdm.h>
+#include <linux/uaccess.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <trace/events/rust_sample.h>

@@ -21341,6 +21341,12 @@ F:	drivers/pci/cma*
 F:	include/linux/spdm.h
 F:	lib/spdm/
 
+RUST SECURITY PROTOCOL AND DATA MODEL (SPDM)
+M:	Alistair Francis <alistair@alistair23.me>
+L:	linux-pci@vger.kernel.org
+S:	Maintained
+F:	lib/rspdm/
+
 SECURITY SUBSYSTEM
 M:	Paul Moore <paul@paul-moore.com>
 M:	James Morris <jmorris@namei.org>
