@@ -26,8 +26,13 @@ use kernel::{
 };
 
 use crate::consts::{
+    SPDM_CTEXPONENT,
+    SPDM_GET_CAPABILITIES,
     SPDM_GET_VERSION,
-    SPDM_MIN_VER, //
+    SPDM_MIN_VER,
+    SPDM_REQ_CAPS,
+    SPDM_VER_10,
+    SPDM_VER_11, //
 };
 
 #[repr(C, packed)]
@@ -155,6 +160,107 @@ impl<'a> Validate<Untrusted<&'a [u8]>> for &'a GetVersionRsp {
         let ptr = ptr.cast::<GetVersionRsp>();
         // SAFETY: `ptr` came from a reference and the cast above is valid.
         let rsp: &GetVersionRsp = unsafe { &*ptr };
+
+        Ok(rsp)
+    }
+}
+
+#[repr(C, packed)]
+pub(crate) struct GetCapabilitiesReq {
+    pub(crate) version: u8,
+    pub(crate) code: u8,
+    pub(crate) param1: u8,
+    pub(crate) param2: u8,
+
+    reserved1: u8,
+    pub(crate) ctexponent: u8,
+    reserved2: [u8; 2],
+
+    pub(crate) flags: u32,
+
+    /* End of SPDM 1.1 structure */
+    pub(crate) data_transfer_size: u32,
+    pub(crate) max_spdm_msg_size: u32,
+}
+
+impl Default for GetCapabilitiesReq {
+    fn default() -> Self {
+        GetCapabilitiesReq {
+            version: 0,
+            code: SPDM_GET_CAPABILITIES,
+            param1: 0,
+            param2: 0,
+            reserved1: 0,
+            ctexponent: SPDM_CTEXPONENT,
+            reserved2: [0; 2],
+            flags: SPDM_REQ_CAPS.to_le(),
+            data_transfer_size: 0,
+            max_spdm_msg_size: 0,
+        }
+    }
+}
+
+#[repr(C, packed)]
+pub(crate) struct GetCapabilitiesRsp {
+    pub(crate) version: u8,
+    pub(crate) code: u8,
+    pub(crate) param1: u8,
+    param2: u8,
+
+    reserved1: u8,
+    pub(crate) ctexponent: u8,
+    reserved2: [u8; 2],
+
+    pub(crate) flags: u32,
+
+    /* End of SPDM 1.1 structure */
+    pub(crate) data_transfer_size: u32,
+    pub(crate) max_spdm_msg_size: u32,
+
+    pub(crate) supported_algorithms: __IncompleteArrayField<__le16>,
+}
+
+impl<'a> Validate<Untrusted<&'a mut KVec<u8>>> for &'a mut GetCapabilitiesRsp {
+    type Err = Error;
+
+    fn validate(unvalidated: &mut KVec<u8>) -> Result<Self, Self::Err> {
+        let version = *(unvalidated.get(0).ok_or(EINVAL))?;
+
+        let expected_length = match version {
+            SPDM_VER_10 | SPDM_VER_11 => {
+                core::mem::size_of::<SpdmHeader>() + 4 + core::mem::size_of::<u32>()
+            }
+            _ => {
+                // Check to see if param1 is set
+                if *(unvalidated.get(2).ok_or(EINVAL))? == 0 {
+                    mem::size_of::<GetCapabilitiesRsp>()
+                        - mem::size_of::<__IncompleteArrayField<__le16>>()
+                } else {
+                    // Not currently supported by Linux, we don't set the bit
+                    // so the responder shouldn't either.
+                    return Err(EINVAL);
+                }
+            }
+        };
+
+        // Make sure the response meets the SPDM spec version requirements
+        if unvalidated.len() < expected_length {
+            return Err(EINVAL);
+        }
+
+        // If the response is shorter than GetCapabilitiesRsp
+        // (which is valid for older spec versions and when param1 is
+        // set to 0) then we need to pad the vector to ensure
+        // GetCapabilitiesRsp will be initialised.
+        while unvalidated.len() < mem::size_of::<GetCapabilitiesRsp>() {
+            unvalidated.push(0, GFP_KERNEL)?;
+        }
+
+        let ptr = unvalidated.as_mut_ptr();
+        // CAST: `GetCapabilitiesRsp` only contains integers and has `repr(C)`.
+        let ptr = ptr.cast::<GetCapabilitiesRsp>();
+        // SAFETY: `ptr` came from a reference and the cast above is valid.
+        let rsp: &mut GetCapabilitiesRsp = unsafe { &mut *ptr };
 
         Ok(rsp)
     }
