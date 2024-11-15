@@ -88,6 +88,9 @@ pub mod code {
     declare_err!(EIOCBQUEUED, "iocb queued, will get completion event.");
     declare_err!(ERECALLCONFLICT, "Conflict with recalled state.");
     declare_err!(ENOGRACE, "NFS file lock reclaim refused.");
+    declare_err!(ECONNRESET, "Connection reset by peer.");
+    declare_err!(EMSGSIZE, "Message too long.");
+    declare_err!(EINPROGRESS, "Operation now in progress.");
 }
 
 /// Generic integer kernel error.
