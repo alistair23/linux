@@ -94,7 +94,7 @@ pub extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int {
     // exclusive `&mut SpdmState` lives entirely inside the lock guard, so
     // concurrent FFI callers serialize on the mutex and can never form
     // aliased `&mut SpdmState` references.
-    let mutex: &Mutex<SpdmState> = unsafe { &*(state_ptr as *const Mutex<SpdmState>) };
+    let mutex: &Mutex<SpdmState<'_>> = unsafe { &*(state_ptr as *const Mutex<SpdmState<'_>>) };
 
     let mut state = mutex.lock();
 
@@ -103,6 +103,10 @@ pub extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int {
     }
 
     if let Err(e) = state.get_capabilities() {
+        return e.to_errno() as c_int;
+    }
+
+    if let Err(e) = state.negotiate_algs() {
         return e.to_errno() as c_int;
     }
 
@@ -117,11 +121,12 @@ pub extern "C" fn spdm_destroy(state_ptr: *mut spdm_state) {
     if state_ptr.is_null() {
         return;
     }
+
     // SAFETY: `state_ptr` was returned from `spdm_create()`, which leaked a
     // `Pin<KBox<Mutex<SpdmState>>>` via `KBox::into_raw`.  The caller
     // guarantees the state is no longer in use.  Reconstructing the pinned
     // box and dropping it runs `Drop` for the `Mutex` and `SpdmState` and
     // frees the allocation.
-    let b = unsafe { KBox::from_raw(state_ptr as *mut Mutex<SpdmState>) };
+    let b = unsafe { KBox::from_raw(state_ptr as *mut Mutex<SpdmState<'_>>) };
     drop(unsafe { Pin::new_unchecked(b) });
 }
