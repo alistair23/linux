@@ -18,8 +18,10 @@ use core::ffi::{
     c_int,
     c_void, //
 };
+use core::pin::Pin;
 use core::ptr;
 use kernel::prelude::*;
+use kernel::sync::{new_mutex, Mutex};
 use kernel::{
     alloc::flags,
     bindings, //
@@ -51,11 +53,22 @@ pub extern "C" fn spdm_create(
     transport_sz: u32,
     validate: bindings::spdm_validate,
 ) -> *mut spdm_state {
-    match KBox::new(
-        SpdmState::new(dev, transport, transport_priv, transport_sz, validate),
-        flags::GFP_KERNEL,
-    ) {
-        Ok(ret) => KBox::into_raw(ret) as *mut spdm_state,
+    // Wrap the `SpdmState` in a `Mutex` so that concurrent FFI callers (for
+    // example, two threads racing on `spdm_authenticate()` for the same
+    // device) serialize on the lock and never form aliased `&mut SpdmState`
+    // references.
+    let state = SpdmState::new(dev, transport, transport_priv, transport_sz, validate);
+    match KBox::pin_init(new_mutex!(state), flags::GFP_KERNEL) {
+        Ok(b) => {
+            // `Mutex<SpdmState>` is `!Unpin` and must remain pinned in
+            // memory.  The C side stores the raw pointer; `spdm_destroy()`
+            // re-pins via `Pin::new_unchecked` before dropping, preserving
+            // the pin invariant.
+            // SAFETY: The contents are not moved between here and the
+            // matching `KBox::from_raw` in `spdm_destroy()`.
+            let raw = KBox::into_raw(unsafe { Pin::into_inner_unchecked(b) });
+            raw as *mut spdm_state
+        }
         Err(_) => ptr::null_mut(),
     }
 }
@@ -70,7 +83,25 @@ pub extern "C" fn spdm_create(
 /// Return 0 on success or a negative errno.  In particular, -EPROTONOSUPPORT
 /// indicates authentication is not supported by the device.
 #[export]
-pub extern "C" fn spdm_authenticate(_state_ptr: *mut spdm_state) -> c_int {
+pub extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int {
+    if state_ptr.is_null() {
+        return -(bindings::EINVAL as c_int);
+    }
+
+    // SAFETY: `state_ptr` was returned from `spdm_create()` (which leaks a
+    // `Pin<KBox<Mutex<SpdmState>>>`) and has not yet been passed to
+    // `spdm_destroy()`.  We only form a shared reference to the mutex; the
+    // exclusive `&mut SpdmState` lives entirely inside the lock guard, so
+    // concurrent FFI callers serialize on the mutex and can never form
+    // aliased `&mut SpdmState` references.
+    let mutex: &Mutex<SpdmState> = unsafe { &*(state_ptr as *const Mutex<SpdmState>) };
+
+    let mut state = mutex.lock();
+
+    if let Err(e) = state.get_version() {
+        return e.to_errno() as c_int;
+    }
+
     -(EPROTONOSUPPORT as i32)
 }
 
@@ -82,8 +113,11 @@ pub extern "C" fn spdm_destroy(state_ptr: *mut spdm_state) {
     if state_ptr.is_null() {
         return;
     }
-    // SAFETY: `state_ptr` was returned from `spdm_create` (which uses
-    // `KBox::into_raw`) and the caller guarantees the state is no longer
-    // in use.  Reconstructing the `KBox` and dropping it frees the state.
-    drop(unsafe { KBox::from_raw(state_ptr as *mut SpdmState) });
+    // SAFETY: `state_ptr` was returned from `spdm_create()`, which leaked a
+    // `Pin<KBox<Mutex<SpdmState>>>` via `KBox::into_raw`.  The caller
+    // guarantees the state is no longer in use.  Reconstructing the pinned
+    // box and dropping it runs `Drop` for the `Mutex` and `SpdmState` and
+    // frees the allocation.
+    let b = unsafe { KBox::from_raw(state_ptr as *mut Mutex<SpdmState>) };
+    drop(unsafe { Pin::new_unchecked(b) });
 }
