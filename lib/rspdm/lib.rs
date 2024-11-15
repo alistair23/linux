@@ -116,6 +116,10 @@ pub unsafe extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int 
         return e.to_errno() as c_int;
     }
 
+    if let Err(e) = state.negotiate_algs() {
+        return e.to_errno() as c_int;
+    }
+
     0
 }
 
@@ -123,4 +127,16 @@ pub unsafe extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int 
 ///
 /// @spdm_state: SPDM session state
 #[export]
-pub unsafe extern "C" fn spdm_destroy(_state_ptr: *mut spdm_state) {}
+pub unsafe extern "C" fn spdm_destroy(state_ptr: *mut spdm_state) {
+    let state: &mut SpdmState = unsafe { &mut (*(state_ptr as *mut SpdmState)) };
+
+    if let Some(desc) = &mut state.desc {
+        unsafe {
+            bindings::kfree(*desc as *mut _ as *mut c_void);
+        }
+    }
+
+    unsafe {
+        bindings::crypto_free_shash(state.shash);
+    }
+}
