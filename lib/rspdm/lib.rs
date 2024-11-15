@@ -108,7 +108,11 @@ pub unsafe extern "C" fn spdm_exchange(
 /// Return 0 on success or a negative errno.  In particular, -EPROTONOSUPPORT
 /// indicates authentication is not supported by the device.
 #[no_mangle]
-pub unsafe extern "C" fn spdm_authenticate(_state: &'static mut SpdmState) -> c_int {
+pub unsafe extern "C" fn spdm_authenticate(state: &'static mut SpdmState) -> c_int {
+    if let Err(e) = state.get_version() {
+        return e.to_errno() as c_int;
+    }
+
     0
 }
 
