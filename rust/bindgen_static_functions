@@ -30,3 +30,7 @@
 
 --allowlist-function copy_from_user
 --allowlist-function copy_to_user
+
+--allowlist-function crypto_shash_descsize
+--allowlist-function crypto_shash_init
+--allowlist-function crypto_shash_digestsize
