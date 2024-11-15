@@ -88,7 +88,7 @@ pub extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int {
     // concurrent FFI callers serialize on the mutex and can never form
     // aliased `&mut SpdmState` references.
     let mutex = unsafe {
-        <Pin<KBox<Mutex<SpdmState>>> as ForeignOwnable>::borrow(state_ptr as *mut c_void)
+        <Pin<KBox<Mutex<SpdmState<'_>>>> as ForeignOwnable>::borrow(state_ptr as *mut c_void)
     };
 
     let mut state = mutex.lock();
@@ -98,6 +98,10 @@ pub extern "C" fn spdm_authenticate(state_ptr: *mut spdm_state) -> c_int {
     }
 
     if let Err(e) = state.get_capabilities() {
+        return e.to_errno() as c_int;
+    }
+
+    if let Err(e) = state.negotiate_algs() {
         return e.to_errno() as c_int;
     }
 
@@ -115,7 +119,7 @@ pub extern "C" fn spdm_destroy(state_ptr: *mut spdm_state) {
 
     // SAFETY: `state_ptr` was returned from `spdm_create()` which used `into_foreign()`
     // to create the pointer.
-    let mutex: KBox<Mutex<SpdmState>> = unsafe { KBox::from_foreign(state_ptr as *mut c_void) };
+    let mutex: KBox<Mutex<SpdmState<'_>>> = unsafe { KBox::from_foreign(state_ptr as *mut c_void) };
 
     drop(mutex);
 }

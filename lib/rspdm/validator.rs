@@ -22,12 +22,16 @@ use kernel::{
 };
 
 use crate::consts::{
+    SPDM_ASYM_ALGOS,
     SPDM_CAP_SUPPORTED_ALGORITHMS,
     SPDM_CTEXPONENT,
     SPDM_GET_CAPABILITIES,
     SPDM_GET_VERSION,
+    SPDM_HASH_ALGOS,
+    SPDM_MEAS_SPEC_DMTF,
     SPDM_MIN_DATA_TRANSFER_SIZE,
     SPDM_MIN_VER,
+    SPDM_NEGOTIATE_ALGS,
     SPDM_REQ_CAPS,
     SPDM_VER_10,
     SPDM_VER_11,
@@ -67,9 +71,9 @@ impl SpdmHeader {
 impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for SpdmHeader {
     type Err = Error;
 
-    type Context = &'c SpdmState;
+    type Context = &'c SpdmState<'c>;
 
-    fn validate(unvalidated: &[u8], _context: &'c SpdmState) -> Result<Self, Self::Err> {
+    fn validate(unvalidated: &[u8], _context: &'c SpdmState<'c>) -> Result<Self, Self::Err> {
         Ok(SpdmHeader {
             version: *unvalidated.get(0).ok_or(EIO)?,
             code: *unvalidated.get(1).ok_or(EIO)?,
@@ -91,9 +95,9 @@ pub(crate) struct SpdmErrorRsp {
 impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for SpdmErrorRsp {
     type Err = Error;
 
-    type Context = &'c SpdmState;
+    type Context = &'c SpdmState<'c>;
 
-    fn validate(unvalidated: &[u8], _context: &'c SpdmState) -> Result<Self, Self::Err> {
+    fn validate(unvalidated: &[u8], _context: &'c SpdmState<'c>) -> Result<Self, Self::Err> {
         Ok(SpdmErrorRsp {
             version: *unvalidated.get(0).ok_or(EIO)?,
             code: *unvalidated.get(1).ok_or(EIO)?,
@@ -143,9 +147,9 @@ impl GetVersionRsp {
 impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for GetVersionRsp {
     type Err = Error;
 
-    type Context = &'c SpdmState;
+    type Context = &'c SpdmState<'c>;
 
-    fn validate(unvalidated: &[u8], context: &'c SpdmState) -> Result<Self, Self::Err> {
+    fn validate(unvalidated: &[u8], context: &'c SpdmState<'c>) -> Result<Self, Self::Err> {
         let header: SpdmHeader =
             Untrusted::new(unvalidated.get(0..4).ok_or(EIO)?).validate(context)?;
 
@@ -396,9 +400,9 @@ impl GetCapabilitiesRsp {
 impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for GetCapabilitiesRsp {
     type Err = Error;
 
-    type Context = &'c SpdmState;
+    type Context = &'c SpdmState<'c>;
 
-    fn validate(unvalidated: &[u8], context: &'c SpdmState) -> Result<Self, Self::Err> {
+    fn validate(unvalidated: &[u8], context: &'c SpdmState<'c>) -> Result<Self, Self::Err> {
         let header: SpdmHeader =
             Untrusted::new(unvalidated.get(0..4).ok_or(EIO)?).validate(context)?;
 
@@ -479,6 +483,217 @@ impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for GetCapabilitiesRsp {
             max_spdm_msg_size,
             supported_algorithms,
             length,
+        })
+    }
+}
+
+pub(crate) struct NegotiateAlgsReq {
+    pub(crate) header: SpdmHeader,
+
+    pub(crate) length: u16,
+    pub(crate) measurement_specification: u8,
+    pub(crate) other_params_support: u8,
+
+    pub(crate) base_asym_algo: u32,
+    pub(crate) base_hash_algo: u32,
+
+    pub(crate) ext_asym_count: u8,
+    pub(crate) ext_hash_count: u8,
+    pub(crate) mel_specification: u8,
+    // ext_asym
+    // ext_hash
+    // resp_alg_struct
+}
+
+impl NegotiateAlgsReq {
+    pub(crate) const WIRE_SIZE: usize = mem::size_of::<SpdmHeader>() + 28;
+
+    pub(crate) fn to_bytes(&self) -> Result<KVec<u8>> {
+        let mut out = self.header.to_bytes()?;
+
+        out.extend_from_slice(&self.length.to_le_bytes(), GFP_KERNEL)?;
+        out.push(self.measurement_specification, GFP_KERNEL)?;
+        out.push(self.other_params_support, GFP_KERNEL)?;
+
+        out.extend_from_slice(&self.base_asym_algo.to_le_bytes(), GFP_KERNEL)?;
+        out.extend_from_slice(&self.base_hash_algo.to_le_bytes(), GFP_KERNEL)?;
+
+        out.extend_from_slice(&[0u8; 12], GFP_KERNEL)?;
+
+        out.push(self.ext_asym_count, GFP_KERNEL)?;
+        out.push(self.ext_hash_count, GFP_KERNEL)?;
+        out.push(0u8, GFP_KERNEL)?;
+        out.push(self.mel_specification, GFP_KERNEL)?;
+
+        Ok(out)
+    }
+}
+
+impl Default for NegotiateAlgsReq {
+    fn default() -> Self {
+        NegotiateAlgsReq {
+            header: SpdmHeader::new(SPDM_NEGOTIATE_ALGS),
+
+            length: 32,
+            measurement_specification: SPDM_MEAS_SPEC_DMTF,
+            other_params_support: 0,
+            base_asym_algo: SPDM_ASYM_ALGOS,
+            base_hash_algo: SPDM_HASH_ALGOS,
+            ext_asym_count: 0,
+            ext_hash_count: 0,
+            mel_specification: 0,
+        }
+    }
+}
+
+/// Size of  everything up to the variable-length algorithm arrays (ExtAsymSel).
+pub(crate) const NEGOTIATE_ALGS_RSP_SZ: usize = mem::size_of::<SpdmHeader>() + 32;
+
+#[expect(dead_code)]
+pub(crate) struct NegotiateAlgsRsp {
+    pub(crate) header: SpdmHeader,
+
+    pub(crate) measurement_specification_sel: u8,
+    pub(crate) other_params_sel: u8,
+
+    pub(crate) measurement_hash_algo: u32,
+    pub(crate) base_asym_sel: u32,
+    pub(crate) base_hash_sel: u32,
+
+    pub(crate) mel_specification_sel: u8,
+    pub(crate) ext_asym_sel_count: u8,
+    pub(crate) ext_hash_sel_count: u8,
+
+    pub(crate) ext_asym: KVec<u32>,
+    pub(crate) ext_hash: KVec<u32>,
+    pub(crate) resp_alg_struct: KVec<RespAlgStruct>,
+
+    /// Size of the response, not public
+    length: usize,
+}
+
+impl NegotiateAlgsRsp {
+    #[expect(dead_code)]
+    pub(crate) fn len(&self) -> usize {
+        self.length
+    }
+}
+
+impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for NegotiateAlgsRsp {
+    type Err = Error;
+
+    type Context = &'c SpdmState<'c>;
+
+    fn validate(unvalidated: &[u8], context: &'c SpdmState<'c>) -> Result<Self, Self::Err> {
+        let header: SpdmHeader =
+            Untrusted::new(unvalidated.get(0..4).ok_or(EIO)?).validate(context)?;
+
+        if header.code != SPDM_NEGOTIATE_ALGS - 0x80 {
+            return Err(EINVAL);
+        }
+
+        if header.version != context.version {
+            pr_err!("Invalid version response\n");
+            return Err(EPROTO);
+        }
+
+        let resp_len = u16::from_le_bytes(
+            unvalidated
+                .get(4..4 + mem::size_of::<u16>())
+                .ok_or(EIO)?
+                .try_into()
+                .map_err(|_| EINVAL)?,
+        );
+
+        let measurement_specification_sel = *unvalidated.get(6).ok_or(EIO)?;
+        let other_params_sel = *unvalidated.get(7).ok_or(EIO)?;
+
+        // Helper to read a little-endian `u32`
+        let read_le32 = |offset: usize| -> Result<u32, Error> {
+            Ok(u32::from_le_bytes(
+                unvalidated
+                    .get(offset..offset + mem::size_of::<u32>())
+                    .ok_or(EIO)?
+                    .try_into()
+                    .map_err(|_| EINVAL)?,
+            ))
+        };
+
+        let measurement_hash_algo = read_le32(8)?;
+        let base_asym_sel = read_le32(12)?;
+        let base_hash_sel = read_le32(16)?;
+
+        let mel_specification_sel = *unvalidated.get(31).ok_or(EIO)?;
+        let ext_asym_sel_count = *unvalidated.get(32).ok_or(EIO)?;
+        let ext_hash_sel_count = *unvalidated.get(33).ok_or(EIO)?;
+
+        let mut offset = NEGOTIATE_ALGS_RSP_SZ;
+
+        let mut ext_asym = KVec::new();
+        for _ in 0..ext_asym_sel_count {
+            ext_asym.push(read_le32(offset)?, GFP_KERNEL)?;
+            offset += mem::size_of::<u32>();
+        }
+
+        let mut ext_hash = KVec::new();
+        for _ in 0..ext_hash_sel_count {
+            ext_hash.push(read_le32(offset)?, GFP_KERNEL)?;
+            offset += mem::size_of::<u32>();
+        }
+
+        let mut resp_alg_struct = KVec::new();
+        for _ in 0..header.param1 {
+            let alg_type = *unvalidated.get(offset).ok_or(EIO)?;
+            let alg_count = *unvalidated.get(offset + 1).ok_or(EIO)?;
+            let fixed_alg_count = (alg_count & 0xf) as usize;
+            let ext_alg_count = (alg_count >> 4) as usize;
+            offset += 2;
+
+            let mut alg_supported = KVec::new();
+            alg_supported.extend_from_slice(
+                unvalidated
+                    .get(offset..offset + fixed_alg_count)
+                    .ok_or(EIO)?,
+                GFP_KERNEL,
+            )?;
+            offset += fixed_alg_count;
+
+            let mut alg_external = KVec::new();
+            for _ in 0..ext_alg_count {
+                alg_external.push(read_le32(offset)?, GFP_KERNEL)?;
+                offset += mem::size_of::<u32>();
+            }
+
+            resp_alg_struct.push(
+                RespAlgStruct {
+                    alg_type,
+                    alg_count,
+                    alg_supported,
+                    alg_external,
+                },
+                GFP_KERNEL,
+            )?;
+        }
+
+        if resp_len != offset as u16 {
+            pr_err!("Incorrect response length reported\n");
+            return Err(EPROTO);
+        }
+
+        Ok(NegotiateAlgsRsp {
+            header,
+            measurement_specification_sel,
+            other_params_sel,
+            measurement_hash_algo,
+            base_asym_sel,
+            base_hash_sel,
+            mel_specification_sel,
+            ext_asym_sel_count,
+            ext_hash_sel_count,
+            ext_asym,
+            ext_hash,
+            resp_alg_struct,
+            length: offset,
         })
     }
 }
