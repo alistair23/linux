@@ -122,6 +122,10 @@ pub unsafe extern "C" fn spdm_authenticate(state: &'static mut SpdmState) -> c_i
         return e.to_errno() as c_int;
     }
 
+    if let Err(e) = state.get_digests() {
+        return e.to_errno() as c_int;
+    }
+
     0
 }
 
