@@ -13,6 +13,7 @@
 #include <linux/blk_types.h>
 #include <linux/blkdev.h>
 #include <linux/cred.h>
+#include <linux/device.h>
 #include <linux/errname.h>
 #include <linux/ethtool.h>
 #include <linux/file.h>

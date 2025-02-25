@@ -169,7 +169,7 @@ pub unsafe extern "C" fn spdm_authenticate(state: &'static mut SpdmState) -> c_i
 /// device_add().
 #[no_mangle]
 pub unsafe extern "C" fn spdm_publish_log(_spdm_state: *mut SpdmState) {
-    todo!()
+    // todo!()
 }
 
 /// spdm_destroy() - Destroy SPDM session
@@ -177,5 +177,5 @@ pub unsafe extern "C" fn spdm_publish_log(_spdm_state: *mut SpdmState) {
 /// @spdm_state: SPDM session state
 #[no_mangle]
 pub unsafe extern "C" fn spdm_destroy(_spdm_state: *mut SpdmState) {
-    todo!()
+    // todo!()
 }

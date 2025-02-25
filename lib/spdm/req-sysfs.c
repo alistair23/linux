@@ -427,7 +427,7 @@ void spdm_create_log_entry(struct spdm_state *spdm_state,
 		.sig = {
 			.attr.name = log->sig_name,
 			.attr.mode = 0444,
-			.read	   = sysfs_bin_attr_simple_read,
+			// .read	   = sysfs_bin_attr_simple_read,
 			.private   = spdm_state->transcript_end -
 				     spdm_state->sig_len,
 			.size	   = spdm_state->sig_len },
@@ -435,21 +435,21 @@ void spdm_create_log_entry(struct spdm_state *spdm_state,
 		.req_nonce = {
 			.attr.name = log->req_nonce_name,
 			.attr.mode = 0444,
-			.read	   = sysfs_bin_attr_simple_read,
+			// .read	   = sysfs_bin_attr_simple_read,
 			.private   = spdm_state->transcript + req_nonce_off,
 			.size	   = SPDM_NONCE_SZ },
 
 		.rsp_nonce = {
 			.attr.name = log->rsp_nonce_name,
 			.attr.mode = 0444,
-			.read	   = sysfs_bin_attr_simple_read,
+			// .read	   = sysfs_bin_attr_simple_read,
 			.private   = spdm_state->transcript + rsp_nonce_off,
 			.size	   = SPDM_NONCE_SZ },
 
 		.transcript = {
 			.attr.name = log->transcript_name,
 			.attr.mode = 0444,
-			.read	   = sysfs_bin_attr_simple_read,
+			// .read	   = sysfs_bin_attr_simple_read,
 			.private   = spdm_state->transcript,
 			.size	   = spdm_state->transcript_end -
 				     spdm_state->transcript -

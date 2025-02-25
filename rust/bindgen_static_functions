@@ -34,3 +34,5 @@
 --allowlist-function crypto_shash_descsize
 --allowlist-function crypto_shash_init
 --allowlist-function crypto_shash_digestsize
+
+--allowlist-function device_is_registered

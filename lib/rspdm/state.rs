@@ -668,6 +668,14 @@ impl SpdmState {
 
         if self.supported_slots != supported_slots {
             self.supported_slots = supported_slots;
+
+            // if unsafe { bindings::device_is_registered(self.dev) } > 0 {
+            //     let dev = *(self.dev);
+            //     let rc = bindings::sysfs_update_group(&mut dev.kobj, &spdm_certificates_group);
+            //     if rc != 0 {
+            //         pr_err!("Cannot update certificates in sysfs: {rc}\n");
+            //     }
+            // }
         }
 
         Ok(())
