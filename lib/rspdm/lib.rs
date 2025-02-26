@@ -136,15 +136,21 @@ pub unsafe extern "C" fn spdm_authenticate(state: &'static mut SpdmState) -> c_i
         provisioned_slots &= !(1 << slot);
     }
 
+    let mut verify = true;
     let mut provisioned_slots = state.provisioned_slots;
     while (provisioned_slots as usize) > 0 {
         let slot = provisioned_slots.trailing_zeros() as u8;
 
         if let Err(e) = state.validate_cert_chain(slot) {
-            return e.to_errno() as c_int;
+            pr_debug!("Certificate in slot {slot} failed to verify: {e:?}");
+            verify = false;
         }
 
         provisioned_slots &= !(1 << slot);
+    }
+
+    if let Err(e) = state.challenge(state.provisioned_slots.trailing_zeros() as u8, verify) {
+        return e.to_errno() as c_int;
     }
 
     0

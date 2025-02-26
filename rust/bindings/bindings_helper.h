@@ -35,6 +35,7 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_ioctl.h>
 #include <crypto/hash.h>
+#include <crypto/public_key.h>
 #include <kunit/test.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/bitmap.h>
