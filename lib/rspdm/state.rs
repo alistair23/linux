@@ -12,7 +12,7 @@ use core::slice::from_raw_parts_mut;
 use kernel::prelude::*;
 use kernel::{
     bindings,
-    error::{code::EINVAL, to_result, Error},
+    error::{code::EINVAL, from_err_ptr, to_result, Error},
     str::CStr,
     validate::Untrusted,
 };
@@ -76,9 +76,10 @@ use crate::validator::{
 /// @slot: Certificate chain in each of the 8 slots.  NULL pointer if a slot is
 ///  not populated.  Prefixed by the 4 + H header per SPDM 1.0.0 table 15.
 /// @slot_sz: Certificate chain size (in bytes).
+/// @leaf_key: Public key portion of leaf certificate against which to check
+///  responder's signatures.
 ///
 /// `authenticated`: Whether device was authenticated successfully.
-#[expect(dead_code)]
 pub struct SpdmState {
     pub(crate) dev: *mut bindings::device,
     pub(crate) transport: bindings::spdm_transport,
@@ -106,11 +107,10 @@ pub struct SpdmState {
     pub(crate) desc: Option<&'static mut bindings::shash_desc>,
     pub(crate) hash_len: usize,
 
-    pub(crate) authenticated: bool,
-
     // Certificates
     pub(crate) slot: [Option<KVec<u8>>; SPDM_SLOTS],
     slot_sz: [usize; SPDM_SLOTS],
+    pub(crate) leaf_key: Option<*mut bindings::public_key>,
 }
 
 #[repr(C, packed)]
@@ -150,9 +150,9 @@ impl SpdmState {
             shash: core::ptr::null_mut(),
             desc: None,
             hash_len: 0,
-            authenticated: false,
             slot: [const { None }; SPDM_SLOTS],
             slot_sz: [0; SPDM_SLOTS],
+            leaf_key: None,
         }
     }
 
@@ -747,6 +747,94 @@ impl SpdmState {
 
         self.slot_sz[slot as usize] = total_cert_len;
         self.slot[slot as usize] = Some(certs_buf);
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_cert_chain(&mut self, slot: u8) -> Result<(), Error> {
+        let cert_chain_buf = self.slot[slot as usize].as_ref().ok_or(ENOMEM)?;
+        let cert_chain_len = self.slot_sz[slot as usize];
+        let header_len = 4 + self.hash_len;
+
+        let mut offset = header_len;
+        let mut prev_cert: Option<*mut bindings::x509_certificate> = None;
+
+        while offset < cert_chain_len {
+            let cert_len = unsafe {
+                bindings::x509_get_certificate_length(
+                    &cert_chain_buf[offset..] as *const _ as *const u8,
+                    cert_chain_len - offset,
+                )
+            };
+
+            if cert_len < 0 {
+                pr_err!("Invalid certificate length\n");
+                to_result(cert_len as i32)?;
+            }
+
+            let _is_leaf_cert = if offset + cert_len as usize == cert_chain_len {
+                true
+            } else {
+                false
+            };
+
+            let cert_ptr = unsafe {
+                from_err_ptr(bindings::x509_cert_parse(
+                    &cert_chain_buf[offset..] as *const _ as *const c_void,
+                    cert_len as usize,
+                ))?
+            };
+            let cert = unsafe { *cert_ptr };
+
+            if cert.unsupported_sig || cert.blacklisted {
+                to_result(-(bindings::EKEYREJECTED as i32))?;
+            }
+
+            if let Some(prev) = prev_cert {
+                // Check against previous certificate
+                let rc = unsafe { bindings::public_key_verify_signature((*prev).pub_, cert.sig) };
+
+                if rc < 0 {
+                    pr_err!("Signature validation error\n");
+                    to_result(rc)?;
+                }
+            } else {
+                // Check aginst root keyring
+                let key = unsafe {
+                    from_err_ptr(bindings::find_asymmetric_key(
+                        self.keyring,
+                        (*cert.sig).auth_ids[0],
+                        (*cert.sig).auth_ids[1],
+                        (*cert.sig).auth_ids[2],
+                        false,
+                    ))?
+                };
+
+                let rc = unsafe { bindings::verify_signature(key, cert.sig) };
+                unsafe { bindings::key_put(key) };
+
+                if rc < 0 {
+                    pr_err!("Root signature validation error\n");
+                    to_result(rc)?;
+                }
+            }
+
+            if let Some(prev) = prev_cert {
+                unsafe { bindings::x509_free_certificate(prev) };
+            }
+
+            prev_cert = Some(cert_ptr);
+            offset += cert_len as usize;
+        }
+
+        if let Some(prev) = prev_cert {
+            if let Some(validate) = self.validate {
+                let rc = unsafe { validate(self.dev, slot, prev) };
+                to_result(rc)?;
+            }
+
+            self.leaf_key = unsafe { Some((*prev).pub_) };
+        }
 
         Ok(())
     }

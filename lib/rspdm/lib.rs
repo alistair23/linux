@@ -136,6 +136,17 @@ pub unsafe extern "C" fn spdm_authenticate(state: &'static mut SpdmState) -> c_i
         provisioned_slots &= !(1 << slot);
     }
 
+    let mut provisioned_slots = state.provisioned_slots;
+    while (provisioned_slots as usize) > 0 {
+        let slot = provisioned_slots.trailing_zeros() as u8;
+
+        if let Err(e) = state.validate_cert_chain(slot) {
+            return e.to_errno() as c_int;
+        }
+
+        provisioned_slots &= !(1 << slot);
+    }
+
     0
 }
 
@@ -144,6 +155,12 @@ pub unsafe extern "C" fn spdm_authenticate(state: &'static mut SpdmState) -> c_i
 /// @spdm_state: SPDM session state
 #[no_mangle]
 pub unsafe extern "C" fn spdm_destroy(state: &'static mut SpdmState) {
+    if let Some(leaf_key) = &mut state.leaf_key {
+        unsafe {
+            bindings::public_key_free(*leaf_key);
+        }
+    }
+
     if let Some(desc) = &mut state.desc {
         unsafe {
             bindings::kfree(*desc as *mut _ as *mut c_void);
