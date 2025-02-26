@@ -24,6 +24,10 @@
 /* Keyring that userspace can poke certs into */
 static struct key *pci_cma_keyring;
 
+extern __initconst const u8 system_certificate_list[];
+extern __initconst const unsigned long system_certificate_list_size;
+extern __initconst const unsigned long module_cert_size;
+
 /*
  * The spdm_requester.c library calls pci_cma_validate() to check requirements
  * for Leaf Certificates per PCIe r6.1 sec 6.31.3.
@@ -218,8 +222,31 @@ void pci_cma_destroy(struct pci_dev *pdev)
 	spdm_destroy(pdev->spdm_state);
 }
 
+/*
+ * Load the compiled-in list of X.509 certificates.
+ */
+static int load_system_certificate_list(void)
+{
+	const u8 *p;
+	unsigned long size;
+
+	pr_notice("Loading compiled-in X.509 certificates for CMA\n");
+
+#ifdef CONFIG_MODULE_SIG
+	p = system_certificate_list;
+	size = system_certificate_list_size;
+#else
+	p = system_certificate_list + module_cert_size;
+	size = system_certificate_list_size - module_cert_size;
+#endif
+
+	return x509_load_certificate_list(p, size, pci_cma_keyring);
+}
+
 __init static int pci_cma_keyring_init(void)
 {
+	int rc;
+
 	pci_cma_keyring = keyring_alloc(".cma", KUIDT_INIT(0), KGIDT_INIT(0),
 					current_cred(),
 					(KEY_POS_ALL & ~KEY_POS_SETATTR) |
@@ -231,6 +258,10 @@ __init static int pci_cma_keyring_init(void)
 		pr_err("PCI: Could not allocate .cma keyring\n");
 		return PTR_ERR(pci_cma_keyring);
 	}
+
+	rc = load_system_certificate_list();
+	if (rc)
+		return rc;
 
 	return 0;
 }
