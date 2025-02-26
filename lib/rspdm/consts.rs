@@ -19,9 +19,10 @@ use kernel::error::{code::EINVAL, Error};
 pub(crate) const SPDM_VER_10: u8 = 0x10;
 pub(crate) const SPDM_VER_11: u8 = 0x11;
 pub(crate) const SPDM_VER_12: u8 = 0x12;
-#[expect(dead_code)]
 pub(crate) const SPDM_VER_13: u8 = 0x13;
 pub(crate) const SPDM_VER_14: u8 = 0x14;
+
+pub(crate) const SPDM_SLOTS: usize = 8;
 
 pub(crate) const SPDM_MIN_VER: u8 = SPDM_VER_10;
 pub(crate) const SPDM_MAX_VER: u8 = SPDM_VER_14;
@@ -144,6 +145,8 @@ pub(crate) const _SPDM_ASYM_EDDSA_ED448: u32 = bit_u32(11);
 pub(crate) const SPDM_HASH_SHA_256: u32 = bit_u32(0);
 pub(crate) const SPDM_HASH_SHA_384: u32 = bit_u32(1);
 pub(crate) const SPDM_HASH_SHA_512: u32 = bit_u32(2);
+
+pub(crate) const SPDM_GET_DIGESTS: u8 = 0x81;
 
 // If the crypto support isn't enabled don't offer the algorithms
 // to the responder
