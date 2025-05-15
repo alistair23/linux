@@ -1,0 +1,1526 @@
+[1;33mdiff --git a/Documentation/netlink/specs/handshake.yaml b/Documentation/netlink/specs/handshake.yaml[m
+[1;33mindex b934cc513e3d..83af5fbeb67d 100644[m
+[1;33m--- a/Documentation/netlink/specs/handshake.yaml[m
+[1;33m+++ b/Documentation/netlink/specs/handshake.yaml[m
+[1;35m@@ -21,7 +21,7 @@[m [mdefinitions:[m
+     type: enum[m
+     name: msg-type[m
+     value-start: 0[m
+[1;31m-    entries: [ unspec, clienthello, serverhello ][m
+[1;32m+[m[1;32m    entries: [ unspec, clienthello, serverhello, clientkeyupdate ][m
+   -[m
+     type: enum[m
+     name: auth[m
+[1;33mdiff --git a/drivers/nvme/host/tcp.c b/drivers/nvme/host/tcp.c[m
+[1;33mindex aba365f97cf6..5534a846339e 100644[m
+[1;33m--- a/drivers/nvme/host/tcp.c[m
+[1;33m+++ b/drivers/nvme/host/tcp.c[m
+[1;35m@@ -9,6 +9,7 @@[m
+ #include <linux/slab.h>[m
+ #include <linux/err.h>[m
+ #include <linux/nvme-tcp.h>[m
+[1;32m+[m[1;32m#include <net/handshake.h>[m
+ #include <linux/nvme-keyring.h>[m
+ #include <net/sock.h>[m
+ #include <net/tcp.h>[m
+[1;35m@@ -205,6 +206,13 @@[m [mstatic struct workqueue_struct *nvme_tcp_wq;[m
+ static const struct blk_mq_ops nvme_tcp_mq_ops;[m
+ static const struct blk_mq_ops nvme_tcp_admin_mq_ops;[m
+ static int nvme_tcp_try_send(struct nvme_tcp_queue *queue);[m
+[1;32m+[m[1;32mstatic int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,[m
+[1;32m+[m			[1;32m      struct nvme_tcp_queue *queue,[m
+[1;32m+[m			[1;32m      key_serial_t pskid,[m
+[1;32m+[m			[1;32m      bool keyupdate);[m
+[1;32m+[m[1;32mstatic void nvme_tcp_restore_sock_ops(struct nvme_tcp_queue *queue);[m
+[1;32m+[m[1;32mstatic void nvme_tcp_stop_queue_nowait(struct nvme_ctrl *nctrl, int qid);[m
+[1;32m+[m[1;32mstatic int nvme_tcp_init_connection(struct nvme_tcp_queue *queue);[m
+ [m
+ static inline struct nvme_tcp_ctrl *to_tcp_ctrl(struct nvme_ctrl *ctrl)[m
+ {[m
+[1;35m@@ -1012,6 +1020,8 @@[m [mstatic int nvme_tcp_recv_skb(read_descriptor_t *desc, struct sk_buff *skb,[m
+ 	size_t consumed = len;[m
+ 	int result;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: %ld\n", __func__, __LINE__, len);[m
+[1;32m+[m
+ 	if (unlikely(!queue->rd_enabled))[m
+ 		return -EFAULT;[m
+ [m
+[1;35m@@ -1059,6 +1069,8 @@[m [mstatic void nvme_tcp_write_space(struct sock *sk)[m
+ {[m
+ 	struct nvme_tcp_queue *queue;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	read_lock_bh(&sk->sk_callback_lock);[m
+ 	queue = sk->sk_user_data;[m
+ 	if (likely(queue && sk_stream_is_writeable(sk))) {[m
+[1;35m@@ -1120,6 +1132,8 @@[m [mstatic int nvme_tcp_try_send_data(struct nvme_tcp_request *req)[m
+ 	int req_data_len = req->data_len;[m
+ 	u32 h2cdata_left = req->h2cdata_left;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	while (true) {[m
+ 		struct bio_vec bvec;[m
+ 		struct msghdr msg = {[m
+[1;35m@@ -1188,6 +1202,8 @@[m [mstatic int nvme_tcp_try_send_cmd_pdu(struct nvme_tcp_request *req)[m
+ 	int len = sizeof(*pdu) + hdgst - req->offset;[m
+ 	int ret;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (inline_data || nvme_tcp_queue_more(queue))[m
+ 		msg.msg_flags |= MSG_MORE;[m
+ 	else[m
+[1;35m@@ -1228,6 +1244,8 @@[m [mstatic int nvme_tcp_try_send_data_pdu(struct nvme_tcp_request *req)[m
+ 	int len = sizeof(*pdu) - req->offset + hdgst;[m
+ 	int ret;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (queue->hdr_digest && !req->offset)[m
+ 		nvme_tcp_hdgst(queue->snd_hash, pdu, sizeof(*pdu));[m
+ [m
+[1;35m@@ -1264,6 +1282,8 @@[m [mstatic int nvme_tcp_try_send_ddgst(struct nvme_tcp_request *req)[m
+ 		.iov_len = NVME_TCP_DIGEST_LENGTH - req->offset[m
+ 	};[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (nvme_tcp_queue_more(queue))[m
+ 		msg.msg_flags |= MSG_MORE;[m
+ 	else[m
+[1;35m@@ -1291,6 +1311,8 @@[m [mstatic int nvme_tcp_try_send(struct nvme_tcp_queue *queue)[m
+ 	unsigned int noreclaim_flag;[m
+ 	int ret = 1;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (!queue->request) {[m
+ 		queue->request = nvme_tcp_fetch_request(queue);[m
+ 		if (!queue->request)[m
+[1;35m@@ -1324,6 +1346,25 @@[m [mstatic int nvme_tcp_try_send(struct nvme_tcp_queue *queue)[m
+ done:[m
+ 	if (ret == -EAGAIN) {[m
+ 		ret = 0;[m
+[1;32m+[m	[1;32m} else if (ret == -EBADMSG) {[m
+[1;32m+[m		[1;32mdev_err(queue->ctrl->ctrl.device, "Host Trying handshake again\n");[m
+[1;32m+[m		[1;32m// tcp_done_with_error(queue->sock->sk, 0);[m
+[1;32m+[m		[1;32mtls_clear_err(queue->sock->sk);[m
+[1;32m+[m		[1;32mhandshake_req_cancel(queue->sock->sk);[m
+[1;32m+[m		[1;32mhandshake_sk_destruct(queue->sock->sk);[m
+[1;32m+[m		[1;32m// nvme_tcp_setup_sock_ops(queue);[m
+[1;32m+[m		[1;32m// nvme_tcp_stop_queue_nowait(&(queue->ctrl->ctrl), nvme_tcp_queue_id(queue));[m
+[1;32m+[m		[1;32mdev_err(queue->ctrl->ctrl.device, "*** Start: nvme_tcp_start_tls\n");[m
+[1;32m+[m		[1;32mret = nvme_tcp_start_tls(&(queue->ctrl->ctrl), queue, queue->ctrl->ctrl.tls_pskid, true);[m
+[1;32m+[m		[1;32mdev_err(queue->ctrl->ctrl.device, "*** End: nvme_tcp_start_tls %d\n", ret);[m
+[1;32m+[m
+[1;32m+[m		[1;32mret = nvme_tcp_init_connection(queue);[m
+[1;32m+[m
+[1;32m+[m		[1;32mif (ret < 0) {[m
+[1;32m+[m			[1;32mdev_err(queue->ctrl->ctrl.device, "nvme_tcp_init_connection: screwed up! %d\n", ret);[m
+[1;32m+[m			[1;32mnvme_tcp_fail_request(queue->request);[m
+[1;32m+[m			[1;32mnvme_tcp_done_send_req(queue);[m
+[1;32m+[m		[1;32m}[m
+ 	} else if (ret < 0) {[m
+ 		dev_err(queue->ctrl->ctrl.device,[m
+ 			"failed to send request %d\n", ret);[m
+[1;35m@@ -1357,6 +1398,8 @@[m [mstatic void nvme_tcp_io_work(struct work_struct *w)[m
+ 		container_of(w, struct nvme_tcp_queue, io_work);[m
+ 	unsigned long deadline = jiffies + msecs_to_jiffies(1);[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	do {[m
+ 		bool pending = false;[m
+ 		int result;[m
+[1;35m@@ -1448,6 +1491,8 @@[m [mstatic void nvme_tcp_free_queue(struct nvme_ctrl *nctrl, int qid)[m
+ 	struct nvme_tcp_queue *queue = &ctrl->queues[qid];[m
+ 	unsigned int noreclaim_flag;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (!test_and_clear_bit(NVME_TCP_Q_ALLOCATED, &queue->flags))[m
+ 		return;[m
+ [m
+[1;35m@@ -1684,7 +1729,7 @@[m [mstatic void nvme_tcp_set_queue_io_cpu(struct nvme_tcp_queue *queue)[m
+ 		set_bit(NVME_TCP_Q_IO_CPU_SET, &queue->flags);[m
+ 	}[m
+ out:[m
+[1;31m-	dev_dbg(ctrl->ctrl.device, "queue %d: using cpu %d\n",[m
+[1;32m+[m	[1;32mdev_err(ctrl->ctrl.device, "queue %d: using cpu %d\n",[m
+ 		qid, queue->io_cpu);[m
+ }[m
+ [m
+[1;35m@@ -1695,7 +1740,7 @@[m [mstatic void nvme_tcp_tls_done(void *data, int status, key_serial_t pskid)[m
+ 	int qid = nvme_tcp_queue_id(queue);[m
+ 	struct key *tls_key;[m
+ [m
+[1;31m-	dev_dbg(ctrl->ctrl.device, "queue %d: TLS handshake done, key %x, status %d\n",[m
+[1;32m+[m	[1;32mdev_err(ctrl->ctrl.device, "queue %d: TLS handshake done, key %x, status %d\n",[m
+ 		qid, pskid, status);[m
+ [m
+ 	if (status) {[m
+[1;35m@@ -1722,7 +1767,8 @@[m [mstatic void nvme_tcp_tls_done(void *data, int status, key_serial_t pskid)[m
+ [m
+ static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,[m
+ 			      struct nvme_tcp_queue *queue,[m
+[1;31m-			      key_serial_t pskid)[m
+[1;32m+[m			[1;32m      key_serial_t pskid,[m
+[1;32m+[m			[1;32m      bool keyupdate)[m
+ {[m
+ 	int qid = nvme_tcp_queue_id(queue);[m
+ 	int ret;[m
+[1;35m@@ -1730,7 +1776,7 @@[m [mstatic int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,[m
+ 	unsigned long tmo = tls_handshake_timeout * HZ;[m
+ 	key_serial_t keyring = nvme_keyring_id();[m
+ [m
+[1;31m-	dev_dbg(nctrl->device, "queue %d: start TLS with key %x\n",[m
+[1;32m+[m	[1;32mdev_err(nctrl->device, "queue %d: start TLS with key %x\n",[m
+ 		qid, pskid);[m
+ 	memset(&args, 0, sizeof(args));[m
+ 	args.ta_sock = queue->sock;[m
+[1;35m@@ -1743,14 +1789,26 @@[m [mstatic int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,[m
+ 	args.ta_keyring = keyring;[m
+ 	args.ta_timeout_ms = tls_handshake_timeout * 1000;[m
+ 	queue->tls_err = -EOPNOTSUPP;[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	init_completion(&queue->tls_complete);[m
+[1;31m-	ret = tls_client_hello_psk(&args, GFP_KERNEL);[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m	[1;32mret = tls_client_hello_psk(&args, GFP_KERNEL, keyupdate);[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	if (ret) {[m
+ 		dev_err(nctrl->device, "queue %d: failed to start TLS: %d\n",[m
+ 			qid, ret);[m
+ 		return ret;[m
+ 	}[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m	[1;32mif (keyupdate) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m		[1;32mreturn 0;[m
+[1;32m+[m	[1;32m}[m
+[1;32m+[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	ret = wait_for_completion_interruptible_timeout(&queue->tls_complete, tmo);[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (ret <= 0) {[m
+ 		if (ret == 0)[m
+ 			ret = -ETIMEDOUT;[m
+[1;35m@@ -1760,7 +1818,7 @@[m [mstatic int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,[m
+ 			qid, ret);[m
+ 		tls_handshake_cancel(queue->sock->sk);[m
+ 	} else {[m
+[1;31m-		dev_dbg(nctrl->device,[m
+[1;32m+[m		[1;32mdev_err(nctrl->device,[m
+ 			"queue %d: TLS handshake complete, error %d\n",[m
+ 			qid, queue->tls_err);[m
+ 		ret = queue->tls_err;[m
+[1;35m@@ -1884,7 +1942,7 @@[m [mstatic int nvme_tcp_alloc_queue(struct nvme_ctrl *nctrl, int qid,[m
+ 		goto err_crypto;[m
+ 	}[m
+ [m
+[1;31m-	dev_dbg(nctrl->device, "connecting queue %d\n",[m
+[1;32m+[m	[1;32mdev_err(nctrl->device, "connecting queue %d\n",[m
+ 			nvme_tcp_queue_id(queue));[m
+ [m
+ 	ret = kernel_connect(queue->sock, (struct sockaddr *)&ctrl->addr,[m
+[1;35m@@ -1897,7 +1955,7 @@[m [mstatic int nvme_tcp_alloc_queue(struct nvme_ctrl *nctrl, int qid,[m
+ [m
+ 	/* If PSKs are configured try to start TLS */[m
+ 	if (nvme_tcp_tls_configured(nctrl) && pskid) {[m
+[1;31m-		ret = nvme_tcp_start_tls(nctrl, queue, pskid);[m
+[1;32m+[m		[1;32mret = nvme_tcp_start_tls(nctrl, queue, pskid, false);[m
+ 		if (ret)[m
+ 			goto err_init_connect;[m
+ 	}[m
+[1;35m@@ -1931,6 +1989,8 @@[m [mstatic void nvme_tcp_restore_sock_ops(struct nvme_tcp_queue *queue)[m
+ {[m
+ 	struct socket *sock = queue->sock;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	write_lock_bh(&sock->sk->sk_callback_lock);[m
+ 	sock->sk->sk_user_data  = NULL;[m
+ 	sock->sk->sk_data_ready = queue->data_ready;[m
+[1;35m@@ -1941,6 +2001,8 @@[m [mstatic void nvme_tcp_restore_sock_ops(struct nvme_tcp_queue *queue)[m
+ [m
+ static void __nvme_tcp_stop_queue(struct nvme_tcp_queue *queue)[m
+ {[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	kernel_sock_shutdown(queue->sock, SHUT_RDWR);[m
+ 	nvme_tcp_restore_sock_ops(queue);[m
+ 	cancel_work_sync(&queue->io_work);[m
+[1;35m@@ -1992,6 +2054,9 @@[m [mstatic void nvme_tcp_stop_queue(struct nvme_ctrl *nctrl, int qid)[m
+ [m
+ static void nvme_tcp_setup_sock_ops(struct nvme_tcp_queue *queue)[m
+ {[m
+[1;32m+[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	write_lock_bh(&queue->sock->sk->sk_callback_lock);[m
+ 	queue->sock->sk->sk_user_data = queue;[m
+ 	queue->state_change = queue->sock->sk->sk_state_change;[m
+[1;35m@@ -2310,7 +2375,7 @@[m [mstatic void nvme_tcp_teardown_admin_queue(struct nvme_ctrl *ctrl,[m
+ 	}[m
+ 	nvme_tcp_free_admin_queue(ctrl);[m
+ 	if (ctrl->tls_pskid) {[m
+[1;31m-		dev_dbg(ctrl->device, "Wipe negotiated TLS_PSK %08x\n",[m
+[1;32m+[m		[1;32mdev_err(ctrl->device, "Wipe negotiated TLS_PSK %08x\n",[m
+ 			ctrl->tls_pskid);[m
+ 		ctrl->tls_pskid = 0;[m
+ 	}[m
+[1;35m@@ -2387,7 +2452,7 @@[m [mstatic int nvme_tcp_setup_ctrl(struct nvme_ctrl *ctrl, bool new)[m
+ [m
+ 	if (ctrl->opts && ctrl->opts->concat && !ctrl->tls_pskid) {[m
+ 		/* See comments for nvme_tcp_key_revoke_needed() */[m
+[1;31m-		dev_dbg(ctrl->device, "restart admin queue for secure concatenation\n");[m
+[1;32m+[m		[1;32mdev_err(ctrl->device, "restart admin queue for secure concatenation\n");[m
+ 		nvme_stop_keep_alive(ctrl);[m
+ 		nvme_tcp_teardown_admin_queue(ctrl, false);[m
+ 		ret = nvme_tcp_configure_admin_queue(ctrl, false);[m
+[1;33mdiff --git a/drivers/nvme/target/core.c b/drivers/nvme/target/core.c[m
+[1;33mindex 245475c43127..e0d35a0ffbb8 100644[m
+[1;33m--- a/drivers/nvme/target/core.c[m
+[1;33m+++ b/drivers/nvme/target/core.c[m
+[1;35m@@ -1727,6 +1727,7 @@[m [mEXPORT_SYMBOL_GPL(nvmet_ctrl_put);[m
+ void nvmet_ctrl_fatal_error(struct nvmet_ctrl *ctrl)[m
+ {[m
+ 	mutex_lock(&ctrl->lock);[m
+[1;32m+[m	[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 	if (!(ctrl->csts & NVME_CSTS_CFS)) {[m
+ 		ctrl->csts |= NVME_CSTS_CFS;[m
+ 		queue_work(nvmet_wq, &ctrl->fatal_err_work);[m
+[1;33mdiff --git a/drivers/nvme/target/tcp.c b/drivers/nvme/target/tcp.c[m
+[1;33mindex 12a5cb8641ca..0e4846eceee7 100644[m
+[1;33m--- a/drivers/nvme/target/tcp.c[m
+[1;33m+++ b/drivers/nvme/target/tcp.c[m
+[1;35m@@ -216,6 +216,7 @@[m [mstatic struct workqueue_struct *nvmet_tcp_wq;[m
+ static const struct nvmet_fabrics_ops nvmet_tcp_ops;[m
+ static void nvmet_tcp_free_cmd(struct nvmet_tcp_cmd *c);[m
+ static void nvmet_tcp_free_cmd_buffers(struct nvmet_tcp_cmd *cmd);[m
+[1;32m+[m[1;32mstatic int nvmet_tcp_tls_handshake(struct nvmet_tcp_queue *queue);[m
+ [m
+ static inline u16 nvmet_tcp_cmd_tag(struct nvmet_tcp_queue *queue,[m
+ 		struct nvmet_tcp_cmd *cmd)[m
+[1;35m@@ -389,6 +390,9 @@[m [mstatic void nvmet_tcp_build_pdu_iovec(struct nvmet_tcp_cmd *cmd)[m
+ static void nvmet_tcp_fatal_error(struct nvmet_tcp_queue *queue)[m
+ {[m
+ 	queue->rcv_state = NVMET_TCP_RECV_ERR;[m
+[1;32m+[m
+[1;32m+[m	[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (queue->nvme_sq.ctrl)[m
+ 		nvmet_ctrl_fatal_error(queue->nvme_sq.ctrl);[m
+ 	else[m
+[1;35m@@ -397,6 +401,8 @@[m [mstatic void nvmet_tcp_fatal_error(struct nvmet_tcp_queue *queue)[m
+ [m
+ static void nvmet_tcp_socket_error(struct nvmet_tcp_queue *queue, int status)[m
+ {[m
+[1;32m+[m	[1;32mpr_err("%s: %d\n", __func__, status);[m
+[1;32m+[m
+ 	queue->rcv_state = NVMET_TCP_RECV_ERR;[m
+ 	if (status == -EPIPE || status == -ECONNRESET)[m
+ 		kernel_sock_shutdown(queue->sock, SHUT_RDWR);[m
+[1;35m@@ -700,16 +706,22 @@[m [mstatic int nvmet_try_send_response(struct nvmet_tcp_cmd *cmd,[m
+ 	else[m
+ 		msg.msg_flags |= MSG_EOR;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	bvec_set_virt(&bvec, (void *)cmd->rsp_pdu + cmd->offset, left);[m
+ 	iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bvec, 1, left);[m
+ 	ret = sock_sendmsg(cmd->queue->sock, &msg);[m
+[1;31m-	if (ret <= 0)[m
+[1;32m+[m	[1;32mif (ret <= 0) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, ret);[m
+ 		return ret;[m
+[1;32m+[m	[1;32m}[m
+ 	cmd->offset += ret;[m
+ 	left -= ret;[m
+ [m
+[1;31m-	if (left)[m
+[1;32m+[m	[1;32mif (left) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		return -EAGAIN;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	nvmet_tcp_free_cmd_buffers(cmd);[m
+ 	cmd->queue->snd_cmd = NULL;[m
+[1;35m@@ -786,38 +798,50 @@[m [mstatic int nvmet_tcp_try_send_one(struct nvmet_tcp_queue *queue,[m
+ 	struct nvmet_tcp_cmd *cmd = queue->snd_cmd;[m
+ 	int ret = 0;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (!cmd || queue->state == NVMET_TCP_Q_DISCONNECTING) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		cmd = nvmet_tcp_fetch_cmd(queue);[m
+[1;31m-		if (unlikely(!cmd))[m
+[1;32m+[m		[1;32mif (unlikely(!cmd)) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			return 0;[m
+[1;32m+[m		[1;32m}[m
+ 	}[m
+ [m
+ 	if (cmd->state == NVMET_TCP_SEND_DATA_PDU) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_try_send_data_pdu(cmd);[m
+ 		if (ret <= 0)[m
+ 			goto done_send;[m
+ 	}[m
+ [m
+ 	if (cmd->state == NVMET_TCP_SEND_DATA) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_try_send_data(cmd, last_in_batch);[m
+ 		if (ret <= 0)[m
+ 			goto done_send;[m
+ 	}[m
+ [m
+ 	if (cmd->state == NVMET_TCP_SEND_DDGST) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_try_send_ddgst(cmd, last_in_batch);[m
+ 		if (ret <= 0)[m
+ 			goto done_send;[m
+ 	}[m
+ [m
+ 	if (cmd->state == NVMET_TCP_SEND_R2T) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_try_send_r2t(cmd, last_in_batch);[m
+ 		if (ret <= 0)[m
+ 			goto done_send;[m
+ 	}[m
+ [m
+[1;31m-	if (cmd->state == NVMET_TCP_SEND_RESPONSE)[m
+[1;32m+[m	[1;32mif (cmd->state == NVMET_TCP_SEND_RESPONSE) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_try_send_response(cmd, last_in_batch);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m	[1;32m}[m
+ [m
+ done_send:[m
+ 	if (ret < 0) {[m
+[1;35m@@ -837,6 +861,7 @@[m [mstatic int nvmet_tcp_try_send(struct nvmet_tcp_queue *queue,[m
+ 	for (i = 0; i < budget; i++) {[m
+ 		ret = nvmet_tcp_try_send_one(queue, i == budget - 1);[m
+ 		if (unlikely(ret < 0)) {[m
+[1;32m+[m			[1;32mpr_err("%s: %d\n", __func__, ret);[m
+ 			nvmet_tcp_socket_error(queue, ret);[m
+ 			goto done;[m
+ 		} else if (ret == 0) {[m
+[1;35m@@ -1188,6 +1213,8 @@[m [mstatic int nvmet_tcp_try_recv_pdu(struct nvmet_tcp_queue *queue)[m
+ 	char cbuf[CMSG_LEN(sizeof(char))] = {};[m
+ 	struct msghdr msg = { .msg_flags = MSG_DONTWAIT };[m
+ [m
+[1;32m+[m	[1;32mpr_err("  %s: %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ recv:[m
+ 	iov.iov_base = (void *)&queue->pdu + queue->offset;[m
+ 	iov.iov_len = queue->left;[m
+[1;35m@@ -1195,22 +1222,51 @@[m [mstatic int nvmet_tcp_try_recv_pdu(struct nvmet_tcp_queue *queue)[m
+ 		msg.msg_control = cbuf;[m
+ 		msg.msg_controllen = sizeof(cbuf);[m
+ 	}[m
+[1;32m+[m	[1;32mpr_err("  %s: %d\n", __func__, __LINE__);[m
+ 	len = kernel_recvmsg(queue->sock, &msg, &iov, 1,[m
+ 			iov.iov_len, msg.msg_flags);[m
+[1;31m-	if (unlikely(len < 0))[m
+[1;32m+[m	[1;32mif (unlikely(len < 0)) {[m
+[1;32m+[m		[1;32mpr_err("  %s: %d: %d\n", __func__, __LINE__, len);[m
+[1;32m+[m		[1;32mif (len == -EKEYEXPIRED) {[m
+[1;32m+[m			[1;32mpr_err("** Key update! start\n");[m
+[1;32m+[m			[1;32mhandshake_req_cancel(queue->sock->sk);[m
+[1;32m+[m			[1;32mhandshake_sk_destruct(queue->sock->sk);[m
+[1;32m+[m			[1;32mqueue->state = NVMET_TCP_Q_TLS_HANDSHAKE;[m
+[1;32m+[m
+[1;32m+[m			[1;32m/* Restore the default callbacks before starting upcall */[m
+[1;32m+[m			[1;32mread_lock_bh(&queue->sock->sk->sk_callback_lock);[m
+[1;32m+[m			[1;32mqueue->sock->sk->sk_user_data = NULL;[m
+[1;32m+[m			[1;32m// queue->sock->sk->sk_data_ready = port->data_ready;[m
+[1;32m+[m			[1;32mread_unlock_bh(&queue->sock->sk->sk_callback_lock);[m
+[1;32m+[m
+[1;32m+[m			[1;32mpr_err("** Key update! %d\n", __LINE__);[m
+[1;32m+[m			[1;32mlen = nvmet_tcp_tls_handshake(queue);[m
+[1;32m+[m			[1;32mpr_err("** Key update! %s: %d\n", __func__, len);[m
+[1;32m+[m		[1;32m}[m
+ 		return len;[m
+[1;32m+[m	[1;32m}[m
+ 	if (queue->tls_pskid) {[m
+[1;32m+[m		[1;32mpr_err("  %s: %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_tcp_tls_record_ok(queue, &msg, cbuf);[m
+ 		if (ret < 0)[m
+ 			return ret;[m
+ 	}[m
+ [m
+[1;32m+[m	[1;32m// for (int i = 0; i < iov.iov_len; i++) {[m
+[1;32m+[m	[1;32m// 	pr_err("iov_base[%d]: %d\n", i, ((char*)(iov.iov_base))[i]);[m
+[1;32m+[m	[1;32m// }[m
+[1;32m+[m
+[1;32m+[m	[1;32mpr_err("  %s: %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	queue->offset += len;[m
+ 	queue->left -= len;[m
+[1;31m-	if (queue->left)[m
+[1;32m+[m	[1;32mif (queue->left) {[m
+[1;32m+[m		[1;32mpr_err("  %s: %d\n", __func__, __LINE__);[m
+ 		return -EAGAIN;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	if (queue->offset == sizeof(struct nvme_tcp_hdr)) {[m
+[1;32m+[m		[1;32mpr_err("  %s: %d\n", __func__, __LINE__);[m
+ 		u8 hdgst = nvmet_tcp_hdgst_len(queue);[m
+ [m
+ 		if (unlikely(!nvmet_tcp_pdu_valid(hdr->type))) {[m
+[1;35m@@ -1261,8 +1317,10 @@[m [mstatic int nvmet_tcp_try_recv_data(struct nvmet_tcp_queue *queue)[m
+ 	while (msg_data_left(&cmd->recv_msg)) {[m
+ 		len = sock_recvmsg(cmd->queue->sock, &cmd->recv_msg,[m
+ 			cmd->recv_msg.msg_flags);[m
+[1;31m-		if (len <= 0)[m
+[1;32m+[m		[1;32mif (len <= 0) {[m
+[1;32m+[m			[1;32mpr_err("%s: %d\n", __func__, len);[m
+ 			return len;[m
+[1;32m+[m		[1;32m}[m
+ 		if (queue->tls_pskid) {[m
+ 			ret = nvmet_tcp_tls_record_ok(cmd->queue,[m
+ 					&cmd->recv_msg, cmd->recv_cbuf);[m
+[1;35m@@ -1345,18 +1403,21 @@[m [mstatic int nvmet_tcp_try_recv_one(struct nvmet_tcp_queue *queue)[m
+ 		return 0;[m
+ [m
+ 	if (queue->rcv_state == NVMET_TCP_RECV_PDU) {[m
+[1;32m+[m		[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 		result = nvmet_tcp_try_recv_pdu(queue);[m
+ 		if (result != 0)[m
+ 			goto done_recv;[m
+ 	}[m
+ [m
+ 	if (queue->rcv_state == NVMET_TCP_RECV_DATA) {[m
+[1;32m+[m		[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 		result = nvmet_tcp_try_recv_data(queue);[m
+ 		if (result != 0)[m
+ 			goto done_recv;[m
+ 	}[m
+ [m
+ 	if (queue->rcv_state == NVMET_TCP_RECV_DDGST) {[m
+[1;32m+[m		[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 		result = nvmet_tcp_try_recv_ddgst(queue);[m
+ 		if (result != 0)[m
+ 			goto done_recv;[m
+[1;35m@@ -1376,9 +1437,12 @@[m [mstatic int nvmet_tcp_try_recv(struct nvmet_tcp_queue *queue,[m
+ {[m
+ 	int i, ret = 0;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	for (i = 0; i < budget; i++) {[m
+ 		ret = nvmet_tcp_try_recv_one(queue);[m
+ 		if (unlikely(ret < 0)) {[m
+[1;32m+[m			[1;32mpr_err("%s: %d\n", __func__, ret);[m
+ 			nvmet_tcp_socket_error(queue, ret);[m
+ 			goto done;[m
+ 		} else if (ret == 0) {[m
+[1;35m@@ -1440,11 +1504,15 @@[m [mstatic void nvmet_tcp_io_work(struct work_struct *w)[m
+ 	do {[m
+ 		pending = false;[m
+ [m
+[1;32m+[m		[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 		ret = nvmet_tcp_try_recv(queue, NVMET_TCP_RECV_BUDGET, &ops);[m
+[1;32m+[m		[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 		if (ret > 0)[m
+ 			pending = true;[m
+[1;31m-		else if (ret < 0)[m
+[1;32m+[m		[1;32melse if (ret < 0) {[m
+[1;32m+[m			[1;32mpr_err("%s: %d\n", __func__, __LINE__);[m
+ 			return;[m
+[1;32m+[m		[1;32m}[m
+ [m
+ 		ret = nvmet_tcp_try_send(queue, NVMET_TCP_SEND_BUDGET, &ops);[m
+ 		if (ret > 0)[m
+[1;35m@@ -1771,7 +1839,7 @@[m [mstatic int nvmet_tcp_try_peek_pdu(struct nvmet_tcp_queue *queue)[m
+ 	len = kernel_recvmsg(queue->sock, &msg, &iov, 1,[m
+ 			iov.iov_len, msg.msg_flags);[m
+ 	if (unlikely(len < 0)) {[m
+[1;31m-		pr_debug("queue %d: peek error %d\n",[m
+[1;32m+[m		[1;32mpr_err("queue %d: peek error %d\n",[m
+ 			 queue->idx, len);[m
+ 		return len;[m
+ 	}[m
+[1;35m@@ -1781,17 +1849,17 @@[m [mstatic int nvmet_tcp_try_peek_pdu(struct nvmet_tcp_queue *queue)[m
+ 		return ret;[m
+ [m
+ 	if (len < sizeof(struct nvme_tcp_hdr)) {[m
+[1;31m-		pr_debug("queue %d: short read, %d bytes missing\n",[m
+[1;32m+[m		[1;32mpr_err("queue %d: short read, %d bytes missing\n",[m
+ 			 queue->idx, (int)iov.iov_len - len);[m
+ 		return -EAGAIN;[m
+ 	}[m
+[1;31m-	pr_debug("queue %d: hdr type %d hlen %d plen %d size %d\n",[m
+[1;32m+[m	[1;32mpr_err("queue %d: hdr type %d hlen %d plen %d size %d\n",[m
+ 		 queue->idx, hdr->type, hdr->hlen, hdr->plen,[m
+ 		 (int)sizeof(struct nvme_tcp_icreq_pdu));[m
+ 	if (hdr->type == nvme_tcp_icreq &&[m
+ 	    hdr->hlen == sizeof(struct nvme_tcp_icreq_pdu) &&[m
+ 	    hdr->plen == cpu_to_le32(sizeof(struct nvme_tcp_icreq_pdu))) {[m
+[1;31m-		pr_debug("queue %d: icreq detected\n",[m
+[1;32m+[m		[1;32mpr_err("queue %d: icreq detected\n",[m
+ 			 queue->idx);[m
+ 		return len;[m
+ 	}[m
+[1;35m@@ -1812,7 +1880,7 @@[m [mstatic int nvmet_tcp_tls_key_lookup(struct nvmet_tcp_queue *queue,[m
+ 		spin_unlock_bh(&queue->state_lock);[m
+ 		status = PTR_ERR(tls_key);[m
+ 	} else {[m
+[1;31m-		pr_debug("%s: queue %d using TLS PSK %x\n",[m
+[1;32m+[m		[1;32mpr_err("%s: queue %d using TLS PSK %x\n",[m
+ 			 __func__, queue->idx, peerid);[m
+ 		queue->nvme_sq.tls_key = tls_key;[m
+ 	}[m
+[1;35m@@ -1824,8 +1892,8 @@[m [mstatic void nvmet_tcp_tls_handshake_done(void *data, int status,[m
+ {[m
+ 	struct nvmet_tcp_queue *queue = data;[m
+ [m
+[1;31m-	pr_debug("queue %d: TLS handshake done, key %x, status %d\n",[m
+[1;31m-		 queue->idx, peerid, status);[m
+[1;32m+[m	[1;32mpr_err("queue %d: TLS handshake done, key %x, status %d, state: %d\n",[m
+[1;32m+[m		[1;32m queue->idx, peerid, status, queue->state);[m
+ 	spin_lock_bh(&queue->state_lock);[m
+ 	if (WARN_ON(queue->state != NVMET_TCP_Q_TLS_HANDSHAKE)) {[m
+ 		spin_unlock_bh(&queue->state_lock);[m
+[1;35m@@ -1877,13 +1945,13 @@[m [mstatic int nvmet_tcp_tls_handshake(struct nvmet_tcp_queue *queue)[m
+ 	int ret = -EOPNOTSUPP;[m
+ 	struct tls_handshake_args args;[m
+ [m
+[1;31m-	if (queue->state != NVMET_TCP_Q_TLS_HANDSHAKE) {[m
+[1;31m-		pr_warn("cannot start TLS in state %d\n", queue->state);[m
+[1;31m-		return -EINVAL;[m
+[1;31m-	}[m
+[1;32m+[m	[1;32m// if (queue->state != NVMET_TCP_Q_TLS_HANDSHAKE) {[m
+[1;32m+[m	[1;32m// 	pr_warn("cannot start TLS in state %d\n", queue->state);[m
+[1;32m+[m	[1;32m// 	return -EINVAL;[m
+[1;32m+[m	[1;32m// }[m
+ [m
+ 	kref_get(&queue->kref);[m
+[1;31m-	pr_debug("queue %d: TLS ServerHello\n", queue->idx);[m
+[1;32m+[m	[1;32mpr_err("queue %d: TLS ServerHello\n", queue->idx);[m
+ 	memset(&args, 0, sizeof(args));[m
+ 	args.ta_sock = queue->sock;[m
+ 	args.ta_done = nvmet_tcp_tls_handshake_done;[m
+[1;33mdiff --git a/include/net/handshake.h b/include/net/handshake.h[m
+[1;33mindex 8ebd4f9ed26e..4a6c19eb72ef 100644[m
+[1;33m--- a/include/net/handshake.h[m
+[1;33m+++ b/include/net/handshake.h[m
+[1;35m@@ -35,13 +35,17 @@[m [mstruct tls_handshake_args {[m
+ [m
+ int tls_client_hello_anon(const struct tls_handshake_args *args, gfp_t flags);[m
+ int tls_client_hello_x509(const struct tls_handshake_args *args, gfp_t flags);[m
+[1;31m-int tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags);[m
+[1;32m+[m[1;32mint tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags,[m
+[1;32m+[m	[1;32mbool keyupdate);[m
+ int tls_server_hello_x509(const struct tls_handshake_args *args, gfp_t flags);[m
+ int tls_server_hello_psk(const struct tls_handshake_args *args, gfp_t flags);[m
+ [m
+ bool tls_handshake_cancel(struct sock *sk);[m
+ void tls_handshake_close(struct socket *sock);[m
+ [m
+[1;32m+[m[1;32mvoid handshake_sk_destruct(struct sock *sk);[m
+[1;32m+[m[1;32mbool handshake_req_cancel(struct sock *sk);[m
+[1;32m+[m
+ u8 tls_get_record_type(const struct sock *sk, const struct cmsghdr *msg);[m
+ void tls_alert_recv(const struct sock *sk, const struct msghdr *msg,[m
+ 		    u8 *level, u8 *description);[m
+[1;33mdiff --git a/include/net/tls.h b/include/net/tls.h[m
+[1;33mindex 857340338b69..fb8a51b11a2c 100644[m
+[1;33m--- a/include/net/tls.h[m
+[1;33m+++ b/include/net/tls.h[m
+[1;35m@@ -493,6 +493,12 @@[m [mstatic inline bool tls_offload_tx_resync_pending(struct sock *sk)[m
+ [m
+ struct sk_buff *tls_encrypt_skb(struct sk_buff *skb);[m
+ [m
+[1;32m+[m[1;32mstatic inline void tls_clear_err(struct sock *sk) {[m
+[1;32m+[m	[1;32mWRITE_ONCE(sk->sk_err, 0);[m
+[1;32m+[m	[1;32m/* Paired with smp_rmb() in tcp_poll() */[m
+[1;32m+[m	[1;32msmp_wmb();[m
+[1;32m+[m[1;32m}[m
+[1;32m+[m
+ #ifdef CONFIG_TLS_DEVICE[m
+ void tls_device_sk_destruct(struct sock *sk);[m
+ void tls_offload_tx_resync_request(struct sock *sk, u32 got_seq, u32 exp_seq);[m
+[1;33mdiff --git a/include/uapi/linux/handshake.h b/include/uapi/linux/handshake.h[m
+[1;33mindex 3d7ea58778c9..ac97d4e0dec4 100644[m
+[1;33m--- a/include/uapi/linux/handshake.h[m
+[1;33m+++ b/include/uapi/linux/handshake.h[m
+[1;35m@@ -19,6 +19,7 @@[m [menum handshake_msg_type {[m
+ 	HANDSHAKE_MSG_TYPE_UNSPEC,[m
+ 	HANDSHAKE_MSG_TYPE_CLIENTHELLO,[m
+ 	HANDSHAKE_MSG_TYPE_SERVERHELLO,[m
+[1;32m+[m	[1;32mHANDSHAKE_MSG_TYPE_CLIENTKEYUPDATE,[m
+ };[m
+ [m
+ enum handshake_auth {[m
+[1;33mdiff --git a/net/handshake/handshake.h b/net/handshake/handshake.h[m
+[1;33mindex a48163765a7a..8306fbcbfa72 100644[m
+[1;33m--- a/net/handshake/handshake.h[m
+[1;33m+++ b/net/handshake/handshake.h[m
+[1;35m@@ -77,6 +77,7 @@[m [mstruct nlmsghdr *handshake_genl_put(struct sk_buff *msg,[m
+ struct handshake_net *handshake_pernet(struct net *net);[m
+ [m
+ /* request.c */[m
+[1;32m+[m[1;32mvoid handshake_sk_destruct(struct sock *sk);[m
+ struct handshake_req *handshake_req_alloc(const struct handshake_proto *proto,[m
+ 					  gfp_t flags);[m
+ int handshake_req_hash_init(void);[m
+[1;33mdiff --git a/net/handshake/request.c b/net/handshake/request.c[m
+[1;33mindex 274d2c89b6b2..8ab3b369f2fc 100644[m
+[1;33m--- a/net/handshake/request.c[m
+[1;33m+++ b/net/handshake/request.c[m
+[1;35m@@ -82,9 +82,8 @@[m [mstatic void handshake_req_destroy(struct handshake_req *req)[m
+ 	kfree(req);[m
+ }[m
+ [m
+[1;31m-static void handshake_sk_destruct(struct sock *sk)[m
+[1;32m+[m[1;32mvoid handshake_sk_destruct(struct sock *sk)[m
+ {[m
+[1;31m-	void (*sk_destruct)(struct sock *sk);[m
+ 	struct handshake_req *req;[m
+ [m
+ 	req = handshake_req_hash_lookup(sk);[m
+[1;35m@@ -92,11 +91,9 @@[m [mstatic void handshake_sk_destruct(struct sock *sk)[m
+ 		return;[m
+ [m
+ 	trace_handshake_destruct(sock_net(sk), req, sk);[m
+[1;31m-	sk_destruct = req->hr_odestruct;[m
+ 	handshake_req_destroy(req);[m
+[1;31m-	if (sk_destruct)[m
+[1;31m-		sk_destruct(sk);[m
+ }[m
+[1;32m+[m[1;32mEXPORT_SYMBOL(handshake_sk_destruct);[m
+ [m
+ /**[m
+  * handshake_req_alloc - Allocate a handshake request[m
+[1;35m@@ -226,45 +223,66 @@[m [mint handshake_req_submit(struct socket *sock, struct handshake_req *req,[m
+ 	struct net *net;[m
+ 	int ret;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (!sock || !req || !sock->file) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		kfree(req);[m
+ 		return -EINVAL;[m
+ 	}[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	req->hr_sk = sock->sk;[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	if (!req->hr_sk) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		kfree(req);[m
+ 		return -EINVAL;[m
+ 	}[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	req->hr_odestruct = req->hr_sk->sk_destruct;[m
+ 	req->hr_sk->sk_destruct = handshake_sk_destruct;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	ret = -EOPNOTSUPP;[m
+ 	net = sock_net(req->hr_sk);[m
+ 	hn = handshake_pernet(net);[m
+[1;31m-	if (!hn)[m
+[1;32m+[m	[1;32mif (!hn) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		goto out_err;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	ret = -EAGAIN;[m
+[1;31m-	if (READ_ONCE(hn->hn_pending) >= hn->hn_pending_max)[m
+[1;32m+[m	[1;32mif (READ_ONCE(hn->hn_pending) >= hn->hn_pending_max) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		goto out_err;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	spin_lock(&hn->hn_lock);[m
+ 	ret = -EOPNOTSUPP;[m
+[1;31m-	if (test_bit(HANDSHAKE_F_NET_DRAINING, &hn->hn_flags))[m
+[1;32m+[m	[1;32mif (test_bit(HANDSHAKE_F_NET_DRAINING, &hn->hn_flags)) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		goto out_unlock;[m
+[1;32m+[m	[1;32m}[m
+ 	ret = -EBUSY;[m
+[1;31m-	if (!handshake_req_hash_add(req))[m
+[1;32m+[m	[1;32mif (!handshake_req_hash_add(req)) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		goto out_unlock;[m
+[1;31m-	if (!__add_pending_locked(hn, req))[m
+[1;32m+[m	[1;32m}[m
+[1;32m+[m	[1;32mif (!__add_pending_locked(hn, req)) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		goto out_unlock;[m
+[1;32m+[m	[1;32m}[m
+ 	spin_unlock(&hn->hn_lock);[m
+ [m
+ 	ret = handshake_genl_notify(net, req->hr_proto, flags);[m
+ 	if (ret) {[m
+ 		trace_handshake_notify_err(net, req, req->hr_sk, ret);[m
+[1;31m-		if (remove_pending(hn, req))[m
+[1;32m+[m		[1;32mif (remove_pending(hn, req)) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			goto out_err;[m
+[1;32m+[m		[1;32m}[m
+ 	}[m
+ [m
+ 	/* Prevent socket release while a handshake request is pending */[m
+[1;35m@@ -288,6 +306,8 @@[m [mvoid handshake_complete(struct handshake_req *req, unsigned int status,[m
+ 	struct sock *sk = req->hr_sk;[m
+ 	struct net *net = sock_net(sk);[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: status: %d\n", __func__, __LINE__, status);[m
+[1;32m+[m
+ 	if (!test_and_set_bit(HANDSHAKE_F_REQ_COMPLETED, &req->hr_flags)) {[m
+ 		trace_handshake_complete(net, req, sk, status);[m
+ 		req->hr_proto->hp_done(req, status, info);[m
+[1;33mdiff --git a/net/handshake/tlshd.c b/net/handshake/tlshd.c[m
+[1;33mindex d6f52839827e..c790ccabdfd6 100644[m
+[1;33m--- a/net/handshake/tlshd.c[m
+[1;33m+++ b/net/handshake/tlshd.c[m
+[1;35m@@ -47,6 +47,8 @@[m [mtls_handshake_req_init(struct handshake_req *req,[m
+ {[m
+ 	struct tls_handshake_req *treq = handshake_req_private(req);[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	treq->th_timeout_ms = args->ta_timeout_ms;[m
+ 	treq->th_consumer_done = args->ta_done;[m
+ 	treq->th_consumer_data = args->ta_data;[m
+[1;35m@@ -201,6 +203,8 @@[m [mstatic int tls_handshake_accept(struct handshake_req *req,[m
+ 	struct sk_buff *msg;[m
+ 	int ret;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	ret = tls_handshake_private_keyring(treq);[m
+ 	if (ret < 0)[m
+ 		goto out;[m
+[1;35m@@ -281,6 +285,8 @@[m [mint tls_client_hello_anon(const struct tls_handshake_args *args, gfp_t flags)[m
+ 	struct tls_handshake_req *treq;[m
+ 	struct handshake_req *req;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	req = handshake_req_alloc(&tls_handshake_proto, flags);[m
+ 	if (!req)[m
+ 		return -ENOMEM;[m
+[1;35m@@ -307,6 +313,8 @@[m [mint tls_client_hello_x509(const struct tls_handshake_args *args, gfp_t flags)[m
+ 	struct tls_handshake_req *treq;[m
+ 	struct handshake_req *req;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	req = handshake_req_alloc(&tls_handshake_proto, flags);[m
+ 	if (!req)[m
+ 		return -ENOMEM;[m
+[1;35m@@ -331,12 +339,15 @@[m [mEXPORT_SYMBOL(tls_client_hello_x509);[m
+  *   %-ESRCH: No user agent is available[m
+  *   %-ENOMEM: Memory allocation failed[m
+  */[m
+[1;31m-int tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags)[m
+[1;32m+[m[1;32mint tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags,[m
+[1;32m+[m		[1;32mbool keyupdate)[m
+ {[m
+ 	struct tls_handshake_req *treq;[m
+ 	struct handshake_req *req;[m
+ 	unsigned int i;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (!args->ta_num_peerids ||[m
+ 	    args->ta_num_peerids > ARRAY_SIZE(treq->th_peerid))[m
+ 		return -EINVAL;[m
+[1;35m@@ -345,7 +356,10 @@[m [mint tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags)[m
+ 	if (!req)[m
+ 		return -ENOMEM;[m
+ 	treq = tls_handshake_req_init(req, args);[m
+[1;31m-	treq->th_type = HANDSHAKE_MSG_TYPE_CLIENTHELLO;[m
+[1;32m+[m	[1;32mif (keyupdate)[m
+[1;32m+[m		[1;32mtreq->th_type = HANDSHAKE_MSG_TYPE_CLIENTKEYUPDATE;[m
+[1;32m+[m	[1;32melse[m
+[1;32m+[m		[1;32mtreq->th_type = HANDSHAKE_MSG_TYPE_CLIENTHELLO;[m
+ 	treq->th_auth_mode = HANDSHAKE_AUTH_PSK;[m
+ 	treq->th_num_peerids = args->ta_num_peerids;[m
+ 	for (i = 0; i < args->ta_num_peerids; i++)[m
+[1;35m@@ -370,6 +384,8 @@[m [mint tls_server_hello_x509(const struct tls_handshake_args *args, gfp_t flags)[m
+ 	struct tls_handshake_req *treq;[m
+ 	struct handshake_req *req;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	req = handshake_req_alloc(&tls_handshake_proto, flags);[m
+ 	if (!req)[m
+ 		return -ENOMEM;[m
+[1;35m@@ -398,6 +414,8 @@[m [mint tls_server_hello_psk(const struct tls_handshake_args *args, gfp_t flags)[m
+ 	struct tls_handshake_req *treq;[m
+ 	struct handshake_req *req;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	req = handshake_req_alloc(&tls_handshake_proto, flags);[m
+ 	if (!req)[m
+ 		return -ENOMEM;[m
+[1;35m@@ -444,5 +462,6 @@[m [mvoid tls_handshake_close(struct socket *sock)[m
+ 		return;[m
+ 	tls_alert_send(sock, TLS_ALERT_LEVEL_WARNING,[m
+ 		       TLS_ALERT_DESC_CLOSE_NOTIFY);[m
+[1;32m+[m	[1;32mhandshake_sk_destruct(sock->sk);[m
+ }[m
+ EXPORT_SYMBOL(tls_handshake_close);[m
+[1;33mdiff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c[m
+[1;33mindex 5df1f1325259..bc2252befefc 100644[m
+[1;33m--- a/net/ipv4/af_inet.c[m
+[1;33m+++ b/net/ipv4/af_inet.c[m
+[1;35m@@ -845,8 +845,12 @@[m [mint inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)[m
+ {[m
+ 	struct sock *sk = sock->sk;[m
+ [m
+[1;31m-	if (unlikely(inet_send_prepare(sk)))[m
+[1;32m+[m	[1;32mpr_err("%s - %d: %d\n", __func__, __LINE__, size);[m
+[1;32m+[m
+[1;32m+[m	[1;32mif (unlikely(inet_send_prepare(sk))) {[m
+[1;32m+[m		[1;32mpr_err("*** %s - %d: %d\n", __func__, __LINE__, size);[m
+ 		return -EAGAIN;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	return INDIRECT_CALL_2(sk->sk_prot->sendmsg, tcp_sendmsg, udp_sendmsg,[m
+ 			       sk, msg, size);[m
+[1;33mdiff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c[m
+[1;33mindex 6edc441b3702..468e56e57b49 100644[m
+[1;33m--- a/net/ipv4/tcp.c[m
+[1;33m+++ b/net/ipv4/tcp.c[m
+[1;35m@@ -1069,6 +1069,8 @@[m [mint tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)[m
+ 	int zc = 0;[m
+ 	long timeo;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: %d\n", __func__, __LINE__, size);[m
+[1;32m+[m
+ 	flags = msg->msg_flags;[m
+ [m
+ 	if ((flags & MSG_ZEROCOPY) && size) {[m
+[1;35m@@ -1362,6 +1364,8 @@[m [mint tcp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)[m
+ {[m
+ 	int ret;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: %d\n", __func__, __LINE__, size);[m
+[1;32m+[m
+ 	lock_sock(sk);[m
+ 	ret = tcp_sendmsg_locked(sk, msg, size);[m
+ 	release_sock(sk);[m
+[1;33mdiff --git a/net/netlink/af_netlink.c b/net/netlink/af_netlink.c[m
+[1;33mindex e8972a857e51..26cd7b94a6c6 100644[m
+[1;33m--- a/net/netlink/af_netlink.c[m
+[1;33m+++ b/net/netlink/af_netlink.c[m
+[1;35m@@ -1348,8 +1348,10 @@[m [mint netlink_unicast(struct sock *ssk, struct sk_buff *skb,[m
+ 	err = netlink_attachskb(sk, skb, &timeo, ssk);[m
+ 	if (err == 1)[m
+ 		goto retry;[m
+[1;31m-	if (err)[m
+[1;32m+[m	[1;32mif (err) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		return err;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	return netlink_sendskb(sk, skb);[m
+ }[m
+[1;33mdiff --git a/net/tls/tls.h b/net/tls/tls.h[m
+[1;33mindex 774859b63f0d..5eab9fbe29b2 100644[m
+[1;33m--- a/net/tls/tls.h[m
+[1;33m+++ b/net/tls/tls.h[m
+[1;35m@@ -308,8 +308,44 @@[m [mstatic inline void[m
+ tls_advance_record_sn(struct sock *sk, struct tls_prot_info *prot,[m
+ 		      struct cipher_context *ctx)[m
+ {[m
+[1;31m-	if (tls_bigint_increment(ctx->rec_seq, prot->rec_seq_size))[m
+[1;32m+[m	[1;32mpr_err("Before increment");[m
+[1;32m+[m	[1;32mfor (int i = 4; i < prot->rec_seq_size; i++) {[m
+[1;32m+[m		[1;32mpr_err("rec_seq[%d]: %d", i, ctx->rec_seq[i]);[m
+[1;32m+[m	[1;32m}[m
+[1;32m+[m
+[1;32m+[m	[1;32mif (ctx->rec_seq[0] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[1] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[2] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[3] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[4] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[5] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[6] == 255 &&[m
+[1;32m+[m		[1;32mctx->rec_seq[7] >= 250) {[m
+[1;32m+[m		[1;32mpr_err("*** Forcing Key update");[m
+[1;32m+[m
+[1;32m+[m		[1;32mstruct tls_context *tls_ctx = tls_get_ctx(sk);[m
+[1;32m+[m		[1;32mstruct tls_sw_context_rx *rx_ctx = tls_ctx->priv_ctx_rx;[m
+[1;32m+[m
+[1;32m+[m		[1;32mWRITE_ONCE(rx_ctx->key_update_pending, true);[m
+[1;32m+[m		[1;32mTLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);[m
+[1;32m+[m
+[1;32m+[m		[1;32mtls_err_abort(sk, -EBADMSG);[m
+[1;32m+[m
+[1;32m+[m		[1;32mreturn;[m
+[1;32m+[m
+[1;32m+[m	[1;32m}[m
+[1;32m+[m
+[1;32m+[m	[1;32mif (tls_bigint_increment(ctx->rec_seq, prot->rec_seq_size)) {[m
+[1;32m+[m		[1;32mstruct tls_context *tls_ctx = tls_get_ctx(sk);[m
+[1;32m+[m		[1;32mstruct tls_sw_context_rx *rx_ctx = tls_ctx->priv_ctx_rx;[m
+[1;32m+[m
+[1;32m+[m		[1;32mpr_err("**** Unable to increment, key update failed ***");[m
+[1;32m+[m
+[1;32m+[m		[1;32mWRITE_ONCE(rx_ctx->key_update_pending, true);[m
+[1;32m+[m		[1;32mTLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);[m
+[1;32m+[m
+ 		tls_err_abort(sk, -EBADMSG);[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	if (prot->version != TLS_1_3_VERSION &&[m
+ 	    prot->cipher_type != TLS_CIPHER_CHACHA20_POLY1305)[m
+[1;33mdiff --git a/net/tls/tls_main.c b/net/tls/tls_main.c[m
+[1;33mindex a3ccb3135e51..3029ab47304c 100644[m
+[1;33m--- a/net/tls/tls_main.c[m
+[1;33m+++ b/net/tls/tls_main.c[m
+[1;35m@@ -623,6 +623,8 @@[m [mstatic int do_tls_setsockopt_conf(struct sock *sk, sockptr_t optval,[m
+ 	int rc = 0;[m
+ 	int conf;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	if (sockptr_is_null(optval) || (optlen < sizeof(*crypto_info)))[m
+ 		return -EINVAL;[m
+ [m
+[1;35m@@ -817,6 +819,8 @@[m [mstatic int do_tls_setsockopt(struct sock *sk, int optname, sockptr_t optval,[m
+ {[m
+ 	int rc = 0;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	switch (optname) {[m
+ 	case TLS_TX:[m
+ 	case TLS_RX:[m
+[1;35m@@ -845,9 +849,13 @@[m [mstatic int tls_setsockopt(struct sock *sk, int level, int optname,[m
+ {[m
+ 	struct tls_context *ctx = tls_get_ctx(sk);[m
+ [m
+[1;31m-	if (level != SOL_TLS)[m
+[1;32m+[m	[1;32mpr_err("%s - %d: %d != %d\n", __func__, __LINE__, level, SOL_TLS);[m
+[1;32m+[m
+[1;32m+[m	[1;32mif (level != SOL_TLS) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		return ctx->sk_proto->setsockopt(sk, level, optname, optval,[m
+ 						 optlen);[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	return do_tls_setsockopt(sk, optname, optval, optlen);[m
+ }[m
+[1;35m@@ -1035,6 +1043,8 @@[m [mstatic void tls_update(struct sock *sk, struct proto *p,[m
+ [m
+ 	WARN_ON_ONCE(sk->sk_prot == p);[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	ctx = tls_get_ctx(sk);[m
+ 	if (likely(ctx)) {[m
+ 		ctx->sk_write_space = write_space;[m
+[1;33mdiff --git a/net/tls/tls_sw.c b/net/tls/tls_sw.c[m
+[1;33mindex 914d4e1516a3..fa3b776d4eb9 100644[m
+[1;33m--- a/net/tls/tls_sw.c[m
+[1;33m+++ b/net/tls/tls_sw.c[m
+[1;35m@@ -168,8 +168,10 @@[m [mstatic int tls_padding_length(struct tls_prot_info *prot, struct sk_buff *skb,[m
+ 		int err;[m
+ [m
+ 		while (content_type == 0) {[m
+[1;31m-			if (offset < prot->prepend_size)[m
+[1;32m+[m			[1;32mif (offset < prot->prepend_size) {[m
+[1;32m+[m				[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 				return -EBADMSG;[m
+[1;32m+[m			[1;32m}[m
+ 			err = skb_copy_bits(skb, rxm->offset + offset,[m
+ 					    &content_type, 1);[m
+ 			if (err)[m
+[1;35m@@ -218,8 +220,10 @@[m [mstatic void tls_decrypt_done(void *data, int err)[m
+ [m
+ 	/* Propagate if there was an err */[m
+ 	if (err) {[m
+[1;31m-		if (err == -EBADMSG)[m
+[1;32m+[m		[1;32mif (err == -EBADMSG) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSDECRYPTERROR);[m
+[1;32m+[m		[1;32m}[m
+ 		ctx->async_wait.err = err;[m
+ 		tls_err_abort(sk, err);[m
+ 	}[m
+[1;35m@@ -600,6 +604,7 @@[m [mstatic int tls_do_encryption(struct sock *sk,[m
+ 	/* Unhook the record from context if encryption is not failure */[m
+ 	ctx->open_rec = NULL;[m
+ 	tls_advance_record_sn(sk, prot, &tls_ctx->tx);[m
+[1;32m+[m	[1;32mpr_err("** %s: Unhook the record from context if encryption is not failure\n", __func__);[m
+ 	return rc;[m
+ }[m
+ [m
+[1;35m@@ -737,6 +742,8 @@[m [mstatic int tls_push_record(struct sock *sk, int flags,[m
+ 	if (!rec)[m
+ 		return 0;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: record_type: %d\n", __func__, __LINE__, record_type);[m
+[1;32m+[m
+ 	msg_pl = &rec->msg_plaintext;[m
+ 	msg_en = &rec->msg_encrypted;[m
+ [m
+[1;35m@@ -780,6 +787,7 @@[m [mstatic int tls_push_record(struct sock *sk, int flags,[m
+ [m
+ 	rec->content_type = record_type;[m
+ 	if (prot->version == TLS_1_3_VERSION) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d: TLS_1_3_VERSION\n", __func__, __LINE__);[m
+ 		/* Add content type to end of message.  No padding added */[m
+ 		sg_set_buf(&rec->sg_content_type, &rec->content_type, 1);[m
+ 		sg_mark_end(&rec->sg_content_type);[m
+[1;35m@@ -816,10 +824,13 @@[m [mstatic int tls_push_record(struct sock *sk, int flags,[m
+ [m
+ 	tls_ctx->pending_open_record_frags = false;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	rc = tls_do_encryption(sk, tls_ctx, ctx, req,[m
+ 			       msg_pl->sg.size + prot->tail_size, i);[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	if (rc < 0) {[m
+ 		if (rc != -EINPROGRESS) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			tls_err_abort(sk, -EBADMSG);[m
+ 			if (split) {[m
+ 				tls_ctx->pending_open_record_frags = true;[m
+[1;35m@@ -856,7 +867,9 @@[m [mstatic int bpf_exec_tx_verdict(struct sk_msg *msg, struct sock *sk,[m
+ 	policy = !(flags & MSG_SENDPAGE_NOPOLICY);[m
+ 	psock = sk_psock_get(sk);[m
+ 	if (!psock || !policy) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		err = tls_push_record(sk, flags, record_type);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err && err != -EINPROGRESS && sk->sk_err == EBADMSG) {[m
+ 			*copied -= sk_msg_free(sk, msg);[m
+ 			tls_free_open_rec(sk);[m
+[1;35m@@ -885,7 +898,9 @@[m [mstatic int bpf_exec_tx_verdict(struct sk_msg *msg, struct sock *sk,[m
+ [m
+ 	switch (psock->eval) {[m
+ 	case __SK_PASS:[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		err = tls_push_record(sk, flags, record_type);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err && err != -EINPROGRESS && sk->sk_err == EBADMSG) {[m
+ 			*copied -= sk_msg_free(sk, msg);[m
+ 			tls_free_open_rec(sk);[m
+[1;35m@@ -967,6 +982,7 @@[m [mstatic int tls_sw_push_pending_record(struct sock *sk, int flags)[m
+ 	if (!copied)[m
+ 		return 0;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	return bpf_exec_tx_verdict(msg_pl, sk, true, TLS_RECORD_TYPE_DATA,[m
+ 				   &copied, flags);[m
+ }[m
+[1;35m@@ -1007,6 +1023,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ {[m
+ 	long timeo = sock_sndtimeo(sk, msg->msg_flags & MSG_DONTWAIT);[m
+ 	struct tls_context *tls_ctx = tls_get_ctx(sk);[m
+[1;32m+[m	[1;32mstruct tls_sw_context_rx *ctx_rx = tls_ctx->priv_ctx_rx;[m
+ 	struct tls_prot_info *prot = &tls_ctx->prot_info;[m
+ 	struct tls_sw_context_tx *ctx = tls_sw_ctx_tx(tls_ctx);[m
+ 	bool async_capable = ctx->async_capable;[m
+[1;35m@@ -1025,12 +1042,21 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 	int orig_size;[m
+ 	int ret = 0;[m
+ [m
+[1;32m+[m	[1;32mif (unlikely(ctx_rx->key_update_pending)) {[m
+[1;32m+[m		[1;32mpr_err("a rekey is pending ***: %d\n", size);[m
+[1;32m+[m		[1;32mrecord_type = TLS_RECORD_TYPE_HANDSHAKE;[m
+[1;32m+[m		[1;32m// WRITE_ONCE(ctx_rx->key_update_pending, false);[m
+[1;32m+[m	[1;32m}[m
+[1;32m+[m
+ 	if (!eor && (msg->msg_flags & MSG_EOR))[m
+ 		return -EINVAL;[m
+ [m
+ 	if (unlikely(msg->msg_controllen)) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = tls_process_cmsg(sk, msg, &record_type);[m
+[1;32m+[m		[1;32mpr_err("%s - %d: record_type: %d\n", __func__, __LINE__, record_type);[m
+ 		if (ret) {[m
+[1;32m+[m			[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 			if (ret == -EINPROGRESS)[m
+ 				num_async++;[m
+ 			else if (ret != -EAGAIN)[m
+[1;35m@@ -1041,6 +1067,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 	while (msg_data_left(msg)) {[m
+ 		if (sk->sk_err) {[m
+ 			ret = -sk->sk_err;[m
+[1;32m+[m			[1;32mpr_err("    %s - %d: %d\n", __func__, __LINE__, sk->sk_err);[m
+ 			goto send_end;[m
+ 		}[m
+ [m
+[1;35m@@ -1050,6 +1077,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 			rec = ctx->open_rec = tls_get_rec(sk);[m
+ 		if (!rec) {[m
+ 			ret = -ENOMEM;[m
+[1;32m+[m			[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 			goto send_end;[m
+ 		}[m
+ [m
+[1;35m@@ -1074,6 +1102,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ alloc_encrypted:[m
+ 		ret = tls_alloc_encrypted_msg(sk, required_size);[m
+ 		if (ret) {[m
+[1;32m+[m			[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 			if (ret != -ENOSPC)[m
+ 				goto wait_for_memory;[m
+ [m
+[1;35m@@ -1086,10 +1115,13 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 		}[m
+ [m
+ 		if (try_to_copy && (msg->msg_flags & MSG_SPLICE_PAGES)) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			ret = tls_sw_sendmsg_splice(sk, msg, msg_pl,[m
+ 						    try_to_copy, &copied);[m
+[1;31m-			if (ret < 0)[m
+[1;32m+[m			[1;32mif (ret < 0) {[m
+[1;32m+[m				[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 				goto send_end;[m
+[1;32m+[m			[1;32m}[m
+ 			tls_ctx->pending_open_record_frags = true;[m
+ [m
+ 			if (sk_msg_full(msg_pl))[m
+[1;35m@@ -1101,12 +1133,17 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 		}[m
+ [m
+ 		if (!is_kvec && (full_record || eor) && !async_capable) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d: record_type: %d\n", __func__, __LINE__, record_type);[m
+[1;32m+[m			[1;32mret = tls_process_cmsg(sk, msg, &record_type);[m
+[1;32m+[m			[1;32mpr_err("%s - %d: record_type: %d\n", __func__, __LINE__, record_type);[m
+ 			u32 first = msg_pl->sg.end;[m
+ [m
+ 			ret = sk_msg_zerocopy_from_iter(sk, &msg->msg_iter,[m
+ 							msg_pl, try_to_copy);[m
+[1;31m-			if (ret)[m
+[1;32m+[m			[1;32mif (ret) {[m
+[1;32m+[m				[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 				goto fallback_to_reg_send;[m
+[1;32m+[m			[1;32m}[m
+ [m
+ 			num_zc++;[m
+ 			copied += try_to_copy;[m
+[1;35m@@ -1116,6 +1153,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 						  record_type, &copied,[m
+ 						  msg->msg_flags);[m
+ 			if (ret) {[m
+[1;32m+[m				[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 				if (ret == -EINPROGRESS)[m
+ 					num_async++;[m
+ 				else if (ret == -ENOMEM)[m
+[1;35m@@ -1139,6 +1177,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ [m
+ 		ret = tls_clone_plaintext_msg(sk, required_size);[m
+ 		if (ret) {[m
+[1;32m+[m			[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 			if (ret != -ENOSPC)[m
+ 				goto send_end;[m
+ [m
+[1;35m@@ -1155,8 +1194,10 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 		if (try_to_copy) {[m
+ 			ret = sk_msg_memcopy_from_iter(sk, &msg->msg_iter,[m
+ 						       msg_pl, try_to_copy);[m
+[1;31m-			if (ret < 0)[m
+[1;32m+[m			[1;32mif (ret < 0) {[m
+[1;32m+[m				[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 				goto trim_sgl;[m
+[1;32m+[m			[1;32m}[m
+ 		}[m
+ [m
+ 		/* Open records defined only if successfully copied, otherwise[m
+[1;35m@@ -1170,6 +1211,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ 						  record_type, &copied,[m
+ 						  msg->msg_flags);[m
+ 			if (ret) {[m
+[1;32m+[m				[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ 				if (ret == -EINPROGRESS)[m
+ 					num_async++;[m
+ 				else if (ret == -ENOMEM)[m
+[1;35m@@ -1189,6 +1231,7 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ wait_for_memory:[m
+ 		ret = sk_stream_wait_memory(sk, &timeo);[m
+ 		if (ret) {[m
+[1;32m+[m			[1;32mpr_err("    %s - %d\n", __func__, __LINE__);[m
+ trim_sgl:[m
+ 			if (ctx->open_rec)[m
+ 				tls_trim_both_msgs(sk, orig_size);[m
+[1;35m@@ -1220,6 +1263,9 @@[m [mstatic int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,[m
+ [m
+ send_end:[m
+ 	ret = sk_stream_error(sk, msg->msg_flags, ret);[m
+[1;32m+[m	[1;32mif (ret < 0) {[m
+[1;32m+[m		[1;32mpr_err("    %s - %d: %d\n", __func__, __LINE__, ret);[m
+[1;32m+[m	[1;32m}[m
+ 	return copied > 0 ? copied : ret;[m
+ }[m
+ [m
+[1;35m@@ -1228,18 +1274,23 @@[m [mint tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)[m
+ 	struct tls_context *tls_ctx = tls_get_ctx(sk);[m
+ 	int ret;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: size: %d\n", __func__, __LINE__, size);[m
+[1;32m+[m
+ 	if (msg->msg_flags & ~(MSG_MORE | MSG_DONTWAIT | MSG_NOSIGNAL |[m
+ 			       MSG_CMSG_COMPAT | MSG_SPLICE_PAGES | MSG_EOR |[m
+ 			       MSG_SENDPAGE_NOPOLICY))[m
+ 		return -EOPNOTSUPP;[m
+ [m
+ 	ret = mutex_lock_interruptible(&tls_ctx->tx_lock);[m
+[1;31m-	if (ret)[m
+[1;32m+[m	[1;32mif (ret) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d: %d\n", __func__, __LINE__, ret);[m
+ 		return ret;[m
+[1;32m+[m	[1;32m}[m
+ 	lock_sock(sk);[m
+ 	ret = tls_sw_sendmsg_locked(sk, msg, size);[m
+ 	release_sock(sk);[m
+ 	mutex_unlock(&tls_ctx->tx_lock);[m
+[1;32m+[m	[1;32mpr_err("%s - %d: %d\n", __func__, __LINE__, ret);[m
+ 	return ret;[m
+ }[m
+ [m
+[1;35m@@ -1274,6 +1325,7 @@[m [mvoid tls_sw_splice_eof(struct socket *sock)[m
+ 		goto unlock;[m
+ [m
+ 	/* Check the BPF advisor and perform transmission. */[m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 	ret = bpf_exec_tx_verdict(msg_pl, sk, false, TLS_RECORD_TYPE_DATA,[m
+ 				  &copied, 0);[m
+ 	switch (ret) {[m
+[1;35m@@ -1315,8 +1367,10 @@[m [mtls_rx_rec_wait(struct sock *sk, struct sk_psock *psock, bool nonblock,[m
+ 	long timeo;[m
+ [m
+ 	/* a rekey is pending, let userspace deal with it */[m
+[1;31m-	if (unlikely(ctx->key_update_pending))[m
+[1;32m+[m	[1;32mif (unlikely(ctx->key_update_pending)) {[m
+[1;32m+[m		[1;32mpr_err("a rekey is pending, let userspace deal with it\n");[m
+ 		return -EKEYEXPIRED;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	timeo = sock_rcvtimeo(sk, nonblock);[m
+ [m
+[1;35m@@ -1485,8 +1539,10 @@[m [mstatic int tls_decrypt_sg(struct sock *sk, struct iov_iter *out_iov,[m
+ [m
+ 	n_sgin = skb_nsg(skb, rxm->offset + prot->prepend_size,[m
+ 			 rxm->full_len - prot->prepend_size);[m
+[1;31m-	if (n_sgin < 1)[m
+[1;32m+[m	[1;32mif (n_sgin < 1) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		return n_sgin ?: -EBADMSG;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	if (darg->zc && (out_iov || out_sg)) {[m
+ 		clear_skb = NULL;[m
+[1;35m@@ -1645,6 +1701,7 @@[m [mtls_decrypt_sw(struct sock *sk, struct tls_context *tls_ctx,[m
+ [m
+ 	err = tls_decrypt_sg(sk, &msg->msg_iter, NULL, darg);[m
+ 	if (err < 0) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err == -EBADMSG)[m
+ 			TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSDECRYPTERROR);[m
+ 		return err;[m
+[1;35m@@ -1732,14 +1789,18 @@[m [mstatic int tls_check_pending_rekey(struct sock *sk, struct tls_context *ctx,[m
+ 	char hs_type;[m
+ 	int err;[m
+ [m
+[1;31m-	if (likely(tlm->control != TLS_RECORD_TYPE_HANDSHAKE))[m
+[1;32m+[m	[1;32mif (likely(tlm->control != TLS_RECORD_TYPE_HANDSHAKE)) {[m
+ 		return 0;[m
+[1;32m+[m	[1;32m}[m
+ [m
+[1;31m-	if (rxm->full_len < 1)[m
+[1;32m+[m	[1;32mif (rxm->full_len < 1) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d: TLS_HANDSHAKE_KEYUPDATE\n", __func__, __LINE__);[m
+ 		return 0;[m
+[1;32m+[m	[1;32m}[m
+ [m
+ 	err = skb_copy_bits(skb, rxm->offset, &hs_type, 1);[m
+ 	if (err < 0) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d: TLS_HANDSHAKE_KEYUPDATE\n", __func__, __LINE__);[m
+ 		DEBUG_NET_WARN_ON_ONCE(1);[m
+ 		return err;[m
+ 	}[m
+[1;35m@@ -1747,6 +1808,8 @@[m [mstatic int tls_check_pending_rekey(struct sock *sk, struct tls_context *ctx,[m
+ 	if (hs_type == TLS_HANDSHAKE_KEYUPDATE) {[m
+ 		struct tls_sw_context_rx *rx_ctx = ctx->priv_ctx_rx;[m
+ [m
+[1;32m+[m		[1;32mpr_err("%s - %d: *** TLS_HANDSHAKE_KEYUPDATE\n", __func__, __LINE__);[m
+[1;32m+[m
+ 		WRITE_ONCE(rx_ctx->key_update_pending, true);[m
+ 		TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);[m
+ 	}[m
+[1;35m@@ -1762,9 +1825,13 @@[m [mstatic int tls_rx_one_record(struct sock *sk, struct msghdr *msg,[m
+ 	struct strp_msg *rxm;[m
+ 	int err;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	err = tls_decrypt_device(sk, msg, tls_ctx, darg);[m
+[1;31m-	if (!err)[m
+[1;32m+[m	[1;32mif (!err) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		err = tls_decrypt_sw(sk, tls_ctx, msg, darg);[m
+[1;32m+[m	[1;32m}[m
+ 	if (err < 0)[m
+ 		return err;[m
+ [m
+[1;35m@@ -1790,8 +1857,10 @@[m [mstatic int tls_record_content_type(struct msghdr *msg, struct tls_msg *tlm,[m
+ [m
+ 	if (!*control) {[m
+ 		*control = tlm->control;[m
+[1;31m-		if (!*control)[m
+[1;32m+[m		[1;32mif (!*control) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			return -EBADMSG;[m
+[1;32m+[m		[1;32m}[m
+ [m
+ 		err = put_cmsg(msg, SOL_TLS, TLS_GET_RECORD_TYPE,[m
+ 			       sizeof(*control), control);[m
+[1;35m@@ -2040,10 +2109,13 @@[m [mint tls_sw_recvmsg(struct sock *sk,[m
+ 		struct tls_decrypt_arg darg;[m
+ 		int to_decrypt, chunk;[m
+ [m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		err = tls_rx_rec_wait(sk, psock, flags & MSG_DONTWAIT,[m
+ 				      released);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err <= 0) {[m
+ 			if (psock) {[m
+[1;32m+[m				[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 				chunk = sk_msg_recvmsg(sk, psock, msg, len,[m
+ 						       flags);[m
+ 				if (chunk > 0) {[m
+[1;35m@@ -2072,8 +2144,11 @@[m [mint tls_sw_recvmsg(struct sock *sk,[m
+ 		else[m
+ 			darg.async = false;[m
+ [m
+[1;32m+[m		[1;32mpr_err("*** %s - %d: %d\n", __func__, __LINE__, tlm->control);[m
+ 		err = tls_rx_one_record(sk, msg, &darg);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err < 0) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			tls_err_abort(sk, -EBADMSG);[m
+ 			goto recv_end;[m
+ 		}[m
+[1;35m@@ -2088,6 +2163,7 @@[m [mint tls_sw_recvmsg(struct sock *sk,[m
+ 		 * For tls1.3, we disable async.[m
+ 		 */[m
+ 		err = tls_record_content_type(msg, tls_msg(darg.skb), &control);[m
+[1;32m+[m		[1;32mpr_err("*** %s - %d: %d\n", __func__, __LINE__, control);[m
+ 		if (err <= 0) {[m
+ 			DEBUG_NET_WARN_ON_ONCE(darg.zc);[m
+ 			tls_rx_rec_done(ctx);[m
+[1;35m@@ -2228,15 +2304,20 @@[m [mssize_t tls_sw_splice_read(struct socket *sock,  loff_t *ppos,[m
+ 	} else {[m
+ 		struct tls_decrypt_arg darg;[m
+ [m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		err = tls_rx_rec_wait(sk, NULL, flags & SPLICE_F_NONBLOCK,[m
+ 				      true);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err <= 0)[m
+ 			goto splice_read_end;[m
+ [m
+ 		memset(&darg.inargs, 0, sizeof(darg.inargs));[m
+ [m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		err = tls_rx_one_record(sk, NULL, &darg);[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		if (err < 0) {[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			tls_err_abort(sk, -EBADMSG);[m
+ 			goto splice_read_end;[m
+ 		}[m
+[1;35m@@ -2250,6 +2331,7 @@[m [mssize_t tls_sw_splice_read(struct socket *sock,  loff_t *ppos,[m
+ [m
+ 	/* splice does not support reading control messages */[m
+ 	if (tlm->control != TLS_RECORD_TYPE_DATA) {[m
+[1;32m+[m		[1;32mpr_err("** splice does not support reading control messages\n");[m
+ 		err = -EINVAL;[m
+ 		goto splice_requeue;[m
+ 	}[m
+[1;35m@@ -2315,14 +2397,19 @@[m [mint tls_sw_read_sock(struct sock *sk, read_descriptor_t *desc,[m
+ 		} else {[m
+ 			struct tls_decrypt_arg darg;[m
+ [m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			err = tls_rx_rec_wait(sk, NULL, true, released);[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			if (err <= 0)[m
+ 				goto read_sock_end;[m
+ [m
+ 			memset(&darg.inargs, 0, sizeof(darg.inargs));[m
+ [m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			err = tls_rx_one_record(sk, NULL, &darg);[m
+[1;32m+[m			[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 			if (err < 0) {[m
+[1;32m+[m				[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 				tls_err_abort(sk, -EBADMSG);[m
+ 				goto read_sock_end;[m
+ 			}[m
+[1;35m@@ -2335,11 +2422,19 @@[m [mint tls_sw_read_sock(struct sock *sk, read_descriptor_t *desc,[m
+ 			tlm = tls_msg(skb);[m
+ 			decrypted += rxm->full_len;[m
+ [m
+[1;32m+[m			[1;32m// for (int i = 0; i < rxm->full_len; i++) {[m
+[1;32m+[m			[1;32m// 	pr_err("** data[%d]: %d\n", i, skb->data[i]);[m
+[1;32m+[m			[1;32m// }[m
+[1;32m+[m
+ 			tls_rx_rec_done(ctx);[m
+ 		}[m
+ [m
+[1;32m+[m		[1;32m// pr_err("** %s: tls_check_pending_rekey\n", __func__);[m
+[1;32m+[m		[1;32m// tls_check_pending_rekey(sk, tls_ctx, skb);[m
+[1;32m+[m
+ 		/* read_sock does not support reading control messages */[m
+ 		if (tlm->control != TLS_RECORD_TYPE_DATA) {[m
+[1;32m+[m			[1;32mpr_err("** splice does not support reading control messages\n");[m
+ 			err = -EINVAL;[m
+ 			goto read_sock_requeue;[m
+ 		}[m
+[1;35m@@ -2428,6 +2523,7 @@[m [mint tls_rx_msg_size(struct tls_strparser *strp, struct sk_buff *skb)[m
+ 		goto read_failure;[m
+ 	}[m
+ 	if (data_len < cipher_overhead) {[m
+[1;32m+[m		[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+ 		ret = -EBADMSG;[m
+ 		goto read_failure;[m
+ 	}[m
+[1;35m@@ -2464,6 +2560,8 @@[m [mstatic void tls_data_ready(struct sock *sk)[m
+ 	struct sk_psock *psock;[m
+ 	gfp_t alloc_save;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	trace_sk_data_ready(sk);[m
+ [m
+ 	alloc_save = sk->sk_allocation;[m
+[1;35m@@ -2722,6 +2820,8 @@[m [mstatic void tls_finish_key_update(struct sock *sk, struct tls_context *tls_ctx)[m
+ {[m
+ 	struct tls_sw_context_rx *ctx = tls_ctx->priv_ctx_rx;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d: Key updated\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	WRITE_ONCE(ctx->key_update_pending, false);[m
+ 	/* wake-up pre-existing poll() */[m
+ 	ctx->saved_data_ready(sk);[m
+[1;35m@@ -2742,6 +2842,8 @@[m [mint tls_set_sw_offload(struct sock *sk, int tx,[m
+ 	struct crypto_tfm *tfm;[m
+ 	int rc = 0;[m
+ [m
+[1;32m+[m	[1;32mpr_err("%s - %d\n", __func__, __LINE__);[m
+[1;32m+[m
+ 	ctx = tls_get_ctx(sk);[m
+ 	prot = &ctx->prot_info;[m
+ [m

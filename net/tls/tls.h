@@ -308,8 +308,40 @@ static inline void
 tls_advance_record_sn(struct sock *sk, struct tls_prot_info *prot,
 		      struct cipher_context *ctx)
 {
-	if (tls_bigint_increment(ctx->rec_seq, prot->rec_seq_size))
-		tls_err_abort(sk, -EBADMSG);
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_rx *rx_ctx = tls_ctx->priv_ctx_rx;
+
+	pr_err("Before increment");
+	for (int i = 4; i < prot->rec_seq_size; i++) {
+		pr_err("rec_seq[%d]: %d", i, ctx->rec_seq[i]);
+	}
+
+	if (!unlikely(rx_ctx->key_update_pending)) {
+		if (ctx->rec_seq[0] == 255 &&
+			ctx->rec_seq[1] == 255 &&
+			ctx->rec_seq[2] == 255 &&
+			ctx->rec_seq[3] == 255 &&
+			ctx->rec_seq[4] == 255 &&
+			ctx->rec_seq[5] == 255 &&
+			ctx->rec_seq[6] == 255 &&
+			ctx->rec_seq[7] == 245) {
+			pr_err("*** Forcing Key update");
+
+			WRITE_ONCE(rx_ctx->key_update_pending, true);
+			// TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);
+
+			tls_err_abort(sk, -EBADMSG);
+		}
+	}
+
+	if (tls_bigint_increment(ctx->rec_seq, prot->rec_seq_size)) {
+		pr_err("**** Unable to increment, key update failed ***");
+
+		// WRITE_ONCE(rx_ctx->key_update_pending, true);
+		// TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);
+
+		// tls_err_abort(sk, -EBADMSG);
+	}
 
 	if (prot->version != TLS_1_3_VERSION &&
 	    prot->cipher_type != TLS_CIPHER_CHACHA20_POLY1305)

@@ -21,7 +21,7 @@ definitions:
     type: enum
     name: msg-type
     value-start: 0
-    entries: [ unspec, clienthello, serverhello ]
+    entries: [ unspec, clienthello, serverhello, clientkeyupdate, serverkeyupdate ]
   -
     type: enum
     name: auth

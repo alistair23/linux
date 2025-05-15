@@ -82,9 +82,8 @@ static void handshake_req_destroy(struct handshake_req *req)
 	kfree(req);
 }
 
-static void handshake_sk_destruct(struct sock *sk)
+void handshake_sk_destruct(struct sock *sk)
 {
-	void (*sk_destruct)(struct sock *sk);
 	struct handshake_req *req;
 
 	req = handshake_req_hash_lookup(sk);
@@ -92,11 +91,9 @@ static void handshake_sk_destruct(struct sock *sk)
 		return;
 
 	trace_handshake_destruct(sock_net(sk), req, sk);
-	sk_destruct = req->hr_odestruct;
 	handshake_req_destroy(req);
-	if (sk_destruct)
-		sk_destruct(sk);
 }
+EXPORT_SYMBOL(handshake_sk_destruct);
 
 /**
  * handshake_req_alloc - Allocate a handshake request
@@ -226,6 +223,8 @@ int handshake_req_submit(struct socket *sock, struct handshake_req *req,
 	struct net *net;
 	int ret;
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	if (!sock || !req || !sock->file) {
 		kfree(req);
 		return -EINVAL;
@@ -242,30 +241,43 @@ int handshake_req_submit(struct socket *sock, struct handshake_req *req,
 	ret = -EOPNOTSUPP;
 	net = sock_net(req->hr_sk);
 	hn = handshake_pernet(net);
-	if (!hn)
+	if (!hn) {
 		goto out_err;
+	}
 
 	ret = -EAGAIN;
-	if (READ_ONCE(hn->hn_pending) >= hn->hn_pending_max)
+	if (READ_ONCE(hn->hn_pending) >= hn->hn_pending_max) {
+		pr_err("%s - %d\n", __func__, __LINE__);
 		goto out_err;
+	}
 
 	spin_lock(&hn->hn_lock);
 	ret = -EOPNOTSUPP;
-	if (test_bit(HANDSHAKE_F_NET_DRAINING, &hn->hn_flags))
+	if (test_bit(HANDSHAKE_F_NET_DRAINING, &hn->hn_flags)) {
+		pr_err("%s - %d\n", __func__, __LINE__);
 		goto out_unlock;
+	}
 	ret = -EBUSY;
-	if (!handshake_req_hash_add(req))
+	if (!handshake_req_hash_add(req)) {
+		pr_err("%s - %d\n", __func__, __LINE__);
 		goto out_unlock;
-	if (!__add_pending_locked(hn, req))
+	}
+	if (!__add_pending_locked(hn, req)) {
+		pr_err("%s - %d\n", __func__, __LINE__);
 		goto out_unlock;
+	}
 	spin_unlock(&hn->hn_lock);
 
 	ret = handshake_genl_notify(net, req->hr_proto, flags);
 	if (ret) {
 		trace_handshake_notify_err(net, req, req->hr_sk, ret);
-		if (remove_pending(hn, req))
+		if (remove_pending(hn, req)) {
+			pr_err("%s - %d\n", __func__, __LINE__);
 			goto out_err;
+		}
 	}
+
+	pr_err("%s - %d\n", __func__, __LINE__);
 
 	/* Prevent socket release while a handshake request is pending */
 	sock_hold(req->hr_sk);
@@ -287,6 +299,8 @@ void handshake_complete(struct handshake_req *req, unsigned int status,
 {
 	struct sock *sk = req->hr_sk;
 	struct net *net = sock_net(sk);
+
+	pr_err("%s - %d: status: %d\n", __func__, __LINE__, status);
 
 	if (!test_and_set_bit(HANDSHAKE_F_REQ_COMPLETED, &req->hr_flags)) {
 		trace_handshake_complete(net, req, sk, status);

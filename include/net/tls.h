@@ -493,6 +493,12 @@ static inline bool tls_offload_tx_resync_pending(struct sock *sk)
 
 struct sk_buff *tls_encrypt_skb(struct sk_buff *skb);
 
+static inline void tls_clear_err(struct sock *sk) {
+	WRITE_ONCE(sk->sk_err, 0);
+	/* Paired with smp_rmb() in tcp_poll() */
+	smp_wmb();
+}
+
 #ifdef CONFIG_TLS_DEVICE
 void tls_device_sk_destruct(struct sock *sk);
 void tls_offload_tx_resync_request(struct sock *sk, u32 got_seq, u32 exp_seq);

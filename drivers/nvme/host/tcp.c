@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/nvme-tcp.h>
+#include <net/handshake.h>
 #include <linux/nvme-keyring.h>
 #include <net/sock.h>
 #include <net/tcp.h>
@@ -205,6 +206,13 @@ static struct workqueue_struct *nvme_tcp_wq;
 static const struct blk_mq_ops nvme_tcp_mq_ops;
 static const struct blk_mq_ops nvme_tcp_admin_mq_ops;
 static int nvme_tcp_try_send(struct nvme_tcp_queue *queue);
+static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
+			      struct nvme_tcp_queue *queue,
+			      key_serial_t pskid,
+			      bool keyupdate);
+static void nvme_tcp_restore_sock_ops(struct nvme_tcp_queue *queue);
+static void nvme_tcp_stop_queue_nowait(struct nvme_ctrl *nctrl, int qid);
+static int nvme_tcp_init_connection(struct nvme_tcp_queue *queue);
 
 static inline struct nvme_tcp_ctrl *to_tcp_ctrl(struct nvme_ctrl *ctrl)
 {
@@ -1324,6 +1332,25 @@ static int nvme_tcp_try_send(struct nvme_tcp_queue *queue)
 done:
 	if (ret == -EAGAIN) {
 		ret = 0;
+	} else if (ret == -EBADMSG) {
+		dev_err(queue->ctrl->ctrl.device, "Host Trying key update\n");
+		// tcp_done_with_error(queue->sock->sk, 0);
+		tls_clear_err(queue->sock->sk);
+		handshake_req_cancel(queue->sock->sk);
+		handshake_sk_destruct(queue->sock->sk);
+		// nvme_tcp_setup_sock_ops(queue);
+		// nvme_tcp_stop_queue_nowait(&(queue->ctrl->ctrl), nvme_tcp_queue_id(queue));
+		dev_err(queue->ctrl->ctrl.device, "*** Start: nvme_tcp_start_tls\n");
+		ret = nvme_tcp_start_tls(&(queue->ctrl->ctrl), queue, queue->ctrl->ctrl.tls_pskid, true);
+		dev_err(queue->ctrl->ctrl.device, "*** End: nvme_tcp_start_tls %d\n", ret);
+
+		// ret = nvme_tcp_init_connection(queue);
+
+		if (ret < 0) {
+			dev_err(queue->ctrl->ctrl.device, "nvme_tcp_init_connection: screwed up! %d\n", ret);
+			nvme_tcp_fail_request(queue->request);
+			nvme_tcp_done_send_req(queue);
+		}
 	} else if (ret < 0) {
 		dev_err(queue->ctrl->ctrl.device,
 			"failed to send request %d\n", ret);
@@ -1722,7 +1749,8 @@ out_complete:
 
 static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
 			      struct nvme_tcp_queue *queue,
-			      key_serial_t pskid)
+			      key_serial_t pskid,
+			      bool keyupdate)
 {
 	int qid = nvme_tcp_queue_id(queue);
 	int ret;
@@ -1743,14 +1771,26 @@ static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
 	args.ta_keyring = keyring;
 	args.ta_timeout_ms = tls_handshake_timeout * 1000;
 	queue->tls_err = -EOPNOTSUPP;
+	pr_err("%s - %d\n", __func__, __LINE__);
 	init_completion(&queue->tls_complete);
-	ret = tls_client_hello_psk(&args, GFP_KERNEL);
+	pr_err("%s - %d\n", __func__, __LINE__);
+	ret = tls_client_hello_psk(&args, GFP_KERNEL, keyupdate);
+	pr_err("%s - %d\n", __func__, __LINE__);
 	if (ret) {
 		dev_err(nctrl->device, "queue %d: failed to start TLS: %d\n",
 			qid, ret);
 		return ret;
 	}
+	pr_err("%s - %d\n", __func__, __LINE__);
+	if (keyupdate) {
+		pr_err("%s - %d\n", __func__, __LINE__);
+		return 0;
+	}
+
+	pr_err("%s - %d\n", __func__, __LINE__);
 	ret = wait_for_completion_interruptible_timeout(&queue->tls_complete, tmo);
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	if (ret <= 0) {
 		if (ret == 0)
 			ret = -ETIMEDOUT;
@@ -1760,9 +1800,9 @@ static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
 			qid, ret);
 		tls_handshake_cancel(queue->sock->sk);
 	} else {
-		dev_dbg(nctrl->device,
-			"queue %d: TLS handshake complete, error %d\n",
-			qid, queue->tls_err);
+		dev_err(nctrl->device,
+			"queue %d: TLS handshake complete, key update%d, error %d\n",
+			qid, keyupdate, queue->tls_err);
 		ret = queue->tls_err;
 	}
 	return ret;
@@ -1884,7 +1924,7 @@ static int nvme_tcp_alloc_queue(struct nvme_ctrl *nctrl, int qid,
 		goto err_crypto;
 	}
 
-	dev_dbg(nctrl->device, "connecting queue %d\n",
+	dev_err(nctrl->device, "connecting queue %d\n",
 			nvme_tcp_queue_id(queue));
 
 	ret = kernel_connect(queue->sock, (struct sockaddr *)&ctrl->addr,
@@ -1897,7 +1937,7 @@ static int nvme_tcp_alloc_queue(struct nvme_ctrl *nctrl, int qid,
 
 	/* If PSKs are configured try to start TLS */
 	if (nvme_tcp_tls_configured(nctrl) && pskid) {
-		ret = nvme_tcp_start_tls(nctrl, queue, pskid);
+		ret = nvme_tcp_start_tls(nctrl, queue, pskid, false);
 		if (ret)
 			goto err_init_connect;
 	}
@@ -2909,8 +2949,7 @@ static struct nvme_tcp_ctrl *nvme_tcp_alloc_ctrl(struct device *dev,
 
 	INIT_LIST_HEAD(&ctrl->list);
 	ctrl->ctrl.opts = opts;
-	ctrl->ctrl.queue_count = opts->nr_io_queues + opts->nr_write_queues +
-				opts->nr_poll_queues + 1;
+	ctrl->ctrl.queue_count = 1;
 	ctrl->ctrl.sqsize = opts->queue_size - 1;
 	ctrl->ctrl.kato = opts->kato;
 

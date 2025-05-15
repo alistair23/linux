@@ -216,6 +216,7 @@ static struct workqueue_struct *nvmet_tcp_wq;
 static const struct nvmet_fabrics_ops nvmet_tcp_ops;
 static void nvmet_tcp_free_cmd(struct nvmet_tcp_cmd *c);
 static void nvmet_tcp_free_cmd_buffers(struct nvmet_tcp_cmd *cmd);
+static int nvmet_tcp_tls_handshake(struct nvmet_tcp_queue *queue, bool keyupdate);
 
 static inline u16 nvmet_tcp_cmd_tag(struct nvmet_tcp_queue *queue,
 		struct nvmet_tcp_cmd *cmd)
@@ -1170,6 +1171,22 @@ static int nvmet_tcp_tls_record_ok(struct nvmet_tcp_queue *queue,
 			ret = -EAGAIN;
 		}
 		break;
+	case TLS_RECORD_TYPE_HANDSHAKE:
+		pr_err("** Key update! start\n");
+		handshake_req_cancel(queue->sock->sk);
+		handshake_sk_destruct(queue->sock->sk);
+		queue->state = NVMET_TCP_Q_TLS_HANDSHAKE;
+
+		/* Restore the default callbacks before starting upcall */
+		read_lock_bh(&queue->sock->sk->sk_callback_lock);
+		queue->sock->sk->sk_user_data = NULL;
+		// queue->sock->sk->sk_data_ready = port->data_ready;
+		read_unlock_bh(&queue->sock->sk->sk_callback_lock);
+
+		pr_err("** Key update! %d\n", __LINE__);
+		ret = nvmet_tcp_tls_handshake(queue, true);
+		pr_err("** Key update! %s: %d\n", __func__, ret);
+		break;
 	default:
 		/* discard this record type */
 		pr_err("queue %d: TLS record %d unhandled\n",
@@ -1197,8 +1214,26 @@ recv:
 	}
 	len = kernel_recvmsg(queue->sock, &msg, &iov, 1,
 			iov.iov_len, msg.msg_flags);
-	if (unlikely(len < 0))
+	if (unlikely(len < 0)) {
+		pr_err("  %s: %d: %d\n", __func__, __LINE__, len);
+		// if (len == -EKEYEXPIRED) {
+		// 	pr_err("** Key update! start\n");
+		// 	handshake_req_cancel(queue->sock->sk);
+		// 	handshake_sk_destruct(queue->sock->sk);
+		// 	queue->state = NVMET_TCP_Q_TLS_HANDSHAKE;
+
+		// 	/* Restore the default callbacks before starting upcall */
+		// 	read_lock_bh(&queue->sock->sk->sk_callback_lock);
+		// 	queue->sock->sk->sk_user_data = NULL;
+		// 	// queue->sock->sk->sk_data_ready = port->data_ready;
+		// 	read_unlock_bh(&queue->sock->sk->sk_callback_lock);
+
+		// 	pr_err("** Key update! %d\n", __LINE__);
+		// 	len = nvmet_tcp_tls_handshake(queue);
+		// 	pr_err("** Key update! %s: %d\n", __func__, len);
+		// }
 		return len;
+	}
 	if (queue->tls_pskid) {
 		ret = nvmet_tcp_tls_record_ok(queue, &msg, cbuf);
 		if (ret < 0)
@@ -1781,17 +1816,17 @@ static int nvmet_tcp_try_peek_pdu(struct nvmet_tcp_queue *queue)
 		return ret;
 
 	if (len < sizeof(struct nvme_tcp_hdr)) {
-		pr_debug("queue %d: short read, %d bytes missing\n",
+		pr_err("queue %d: short read, %d bytes missing\n",
 			 queue->idx, (int)iov.iov_len - len);
 		return -EAGAIN;
 	}
-	pr_debug("queue %d: hdr type %d hlen %d plen %d size %d\n",
+	pr_err("queue %d: hdr type %d hlen %d plen %d size %d\n",
 		 queue->idx, hdr->type, hdr->hlen, hdr->plen,
 		 (int)sizeof(struct nvme_tcp_icreq_pdu));
 	if (hdr->type == nvme_tcp_icreq &&
 	    hdr->hlen == sizeof(struct nvme_tcp_icreq_pdu) &&
 	    hdr->plen == cpu_to_le32(sizeof(struct nvme_tcp_icreq_pdu))) {
-		pr_debug("queue %d: icreq detected\n",
+		pr_err("queue %d: icreq detected\n",
 			 queue->idx);
 		return len;
 	}
@@ -1812,7 +1847,7 @@ static int nvmet_tcp_tls_key_lookup(struct nvmet_tcp_queue *queue,
 		spin_unlock_bh(&queue->state_lock);
 		status = PTR_ERR(tls_key);
 	} else {
-		pr_debug("%s: queue %d using TLS PSK %x\n",
+		pr_err("%s: queue %d using TLS PSK %x\n",
 			 __func__, queue->idx, peerid);
 		queue->nvme_sq.tls_key = tls_key;
 	}
@@ -1824,8 +1859,8 @@ static void nvmet_tcp_tls_handshake_done(void *data, int status,
 {
 	struct nvmet_tcp_queue *queue = data;
 
-	pr_debug("queue %d: TLS handshake done, key %x, status %d\n",
-		 queue->idx, peerid, status);
+	pr_err("queue %d: TLS handshake done, key %x, status %d, state: %d\n",
+		 queue->idx, peerid, status, queue->state);
 	spin_lock_bh(&queue->state_lock);
 	if (WARN_ON(queue->state != NVMET_TCP_Q_TLS_HANDSHAKE)) {
 		spin_unlock_bh(&queue->state_lock);
@@ -1872,18 +1907,18 @@ static void nvmet_tcp_tls_handshake_timeout(struct work_struct *w)
 	kref_put(&queue->kref, nvmet_tcp_release_queue);
 }
 
-static int nvmet_tcp_tls_handshake(struct nvmet_tcp_queue *queue)
+static int nvmet_tcp_tls_handshake(struct nvmet_tcp_queue *queue, bool keyupdate)
 {
 	int ret = -EOPNOTSUPP;
 	struct tls_handshake_args args;
 
-	if (queue->state != NVMET_TCP_Q_TLS_HANDSHAKE) {
-		pr_warn("cannot start TLS in state %d\n", queue->state);
-		return -EINVAL;
-	}
+	// if (queue->state != NVMET_TCP_Q_TLS_HANDSHAKE) {
+	// 	pr_warn("cannot start TLS in state %d\n", queue->state);
+	// 	return -EINVAL;
+	// }
 
 	kref_get(&queue->kref);
-	pr_debug("queue %d: TLS ServerHello\n", queue->idx);
+	pr_err("queue %d: TLS ServerHello\n", queue->idx);
 	memset(&args, 0, sizeof(args));
 	args.ta_sock = queue->sock;
 	args.ta_done = nvmet_tcp_tls_handshake_done;
@@ -1891,7 +1926,7 @@ static int nvmet_tcp_tls_handshake(struct nvmet_tcp_queue *queue)
 	args.ta_keyring = key_serial(queue->port->nport->keyring);
 	args.ta_timeout_ms = tls_handshake_timeout * 1000;
 
-	ret = tls_server_hello_psk(&args, GFP_KERNEL);
+	ret = tls_server_hello_psk(&args, GFP_KERNEL, keyupdate);
 	if (ret) {
 		kref_put(&queue->kref, nvmet_tcp_release_queue);
 		pr_err("failed to start TLS, err=%d\n", ret);
@@ -1972,7 +2007,7 @@ static void nvmet_tcp_alloc_queue(struct nvmet_tcp_port *port,
 		sk->sk_data_ready = port->data_ready;
 		read_unlock_bh(&sk->sk_callback_lock);
 		if (!nvmet_tcp_try_peek_pdu(queue)) {
-			if (!nvmet_tcp_tls_handshake(queue))
+			if (!nvmet_tcp_tls_handshake(queue, false))
 				return;
 			/* TLS handshake failed, terminate the connection */
 			goto out_destroy_sq;

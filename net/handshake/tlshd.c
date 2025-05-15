@@ -47,6 +47,8 @@ tls_handshake_req_init(struct handshake_req *req,
 {
 	struct tls_handshake_req *treq = handshake_req_private(req);
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	treq->th_timeout_ms = args->ta_timeout_ms;
 	treq->th_consumer_done = args->ta_done;
 	treq->th_consumer_data = args->ta_data;
@@ -201,6 +203,8 @@ static int tls_handshake_accept(struct handshake_req *req,
 	struct sk_buff *msg;
 	int ret;
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	ret = tls_handshake_private_keyring(treq);
 	if (ret < 0)
 		goto out;
@@ -281,6 +285,8 @@ int tls_client_hello_anon(const struct tls_handshake_args *args, gfp_t flags)
 	struct tls_handshake_req *treq;
 	struct handshake_req *req;
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	req = handshake_req_alloc(&tls_handshake_proto, flags);
 	if (!req)
 		return -ENOMEM;
@@ -307,6 +313,8 @@ int tls_client_hello_x509(const struct tls_handshake_args *args, gfp_t flags)
 	struct tls_handshake_req *treq;
 	struct handshake_req *req;
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	req = handshake_req_alloc(&tls_handshake_proto, flags);
 	if (!req)
 		return -ENOMEM;
@@ -331,11 +339,14 @@ EXPORT_SYMBOL(tls_client_hello_x509);
  *   %-ESRCH: No user agent is available
  *   %-ENOMEM: Memory allocation failed
  */
-int tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags)
+int tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags,
+		bool keyupdate)
 {
 	struct tls_handshake_req *treq;
 	struct handshake_req *req;
 	unsigned int i;
+
+	pr_err("%s - %d\n", __func__, __LINE__);
 
 	if (!args->ta_num_peerids ||
 	    args->ta_num_peerids > ARRAY_SIZE(treq->th_peerid))
@@ -345,7 +356,10 @@ int tls_client_hello_psk(const struct tls_handshake_args *args, gfp_t flags)
 	if (!req)
 		return -ENOMEM;
 	treq = tls_handshake_req_init(req, args);
-	treq->th_type = HANDSHAKE_MSG_TYPE_CLIENTHELLO;
+	if (keyupdate)
+		treq->th_type = HANDSHAKE_MSG_TYPE_CLIENTKEYUPDATE;
+	else
+		treq->th_type = HANDSHAKE_MSG_TYPE_CLIENTHELLO;
 	treq->th_auth_mode = HANDSHAKE_AUTH_PSK;
 	treq->th_num_peerids = args->ta_num_peerids;
 	for (i = 0; i < args->ta_num_peerids; i++)
@@ -370,6 +384,8 @@ int tls_server_hello_x509(const struct tls_handshake_args *args, gfp_t flags)
 	struct tls_handshake_req *treq;
 	struct handshake_req *req;
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	req = handshake_req_alloc(&tls_handshake_proto, flags);
 	if (!req)
 		return -ENOMEM;
@@ -393,16 +409,22 @@ EXPORT_SYMBOL(tls_server_hello_x509);
  *   %-ESRCH: No user agent is available
  *   %-ENOMEM: Memory allocation failed
  */
-int tls_server_hello_psk(const struct tls_handshake_args *args, gfp_t flags)
+int tls_server_hello_psk(const struct tls_handshake_args *args, gfp_t flags,
+	bool keyupdate)
 {
 	struct tls_handshake_req *treq;
 	struct handshake_req *req;
+
+	pr_err("%s - %d\n", __func__, __LINE__);
 
 	req = handshake_req_alloc(&tls_handshake_proto, flags);
 	if (!req)
 		return -ENOMEM;
 	treq = tls_handshake_req_init(req, args);
-	treq->th_type = HANDSHAKE_MSG_TYPE_SERVERHELLO;
+	if (keyupdate)
+		treq->th_type = HANDSHAKE_MSG_TYPE_SERVERKEYUPDATE;
+	else
+		treq->th_type = HANDSHAKE_MSG_TYPE_SERVERHELLO;
 	treq->th_auth_mode = HANDSHAKE_AUTH_PSK;
 	treq->th_num_peerids = 1;
 	treq->th_peerid[0] = args->ta_my_peerids[0];
@@ -444,5 +466,6 @@ void tls_handshake_close(struct socket *sock)
 		return;
 	tls_alert_send(sock, TLS_ALERT_LEVEL_WARNING,
 		       TLS_ALERT_DESC_CLOSE_NOTIFY);
+	handshake_sk_destruct(sock->sk);
 }
 EXPORT_SYMBOL(tls_handshake_close);

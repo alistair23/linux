@@ -1007,6 +1007,7 @@ static int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,
 {
 	long timeo = sock_sndtimeo(sk, msg->msg_flags & MSG_DONTWAIT);
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_rx *ctx_rx = tls_ctx->priv_ctx_rx;
 	struct tls_prot_info *prot = &tls_ctx->prot_info;
 	struct tls_sw_context_tx *ctx = tls_sw_ctx_tx(tls_ctx);
 	bool async_capable = ctx->async_capable;
@@ -1024,6 +1025,12 @@ static int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,
 	int num_zc = 0;
 	int orig_size;
 	int ret = 0;
+
+	// if (unlikely(ctx_rx->key_update_pending)) {
+	// 	pr_err("a rekey is pending ***: %d\n", size);
+	// 	record_type = TLS_RECORD_TYPE_HANDSHAKE;
+	// 	// WRITE_ONCE(ctx_rx->key_update_pending, false);
+	// }
 
 	if (!eor && (msg->msg_flags & MSG_EOR))
 		return -EINVAL;
@@ -1101,12 +1108,17 @@ alloc_encrypted:
 		}
 
 		if (!is_kvec && (full_record || eor) && !async_capable) {
+			pr_err("%s - %d: record_type: %d\n", __func__, __LINE__, record_type);
+			ret = tls_process_cmsg(sk, msg, &record_type);
+			pr_err("%s - %d: record_type: %d\n", __func__, __LINE__, record_type);
 			u32 first = msg_pl->sg.end;
 
 			ret = sk_msg_zerocopy_from_iter(sk, &msg->msg_iter,
 							msg_pl, try_to_copy);
-			if (ret)
+			if (ret) {
+				pr_err("    %s - %d\n", __func__, __LINE__);
 				goto fallback_to_reg_send;
+			}
 
 			num_zc++;
 			copied += try_to_copy;
@@ -1732,20 +1744,26 @@ static int tls_check_pending_rekey(struct sock *sk, struct tls_context *ctx,
 	char hs_type;
 	int err;
 
-	if (likely(tlm->control != TLS_RECORD_TYPE_HANDSHAKE))
+	if (likely(tlm->control != TLS_RECORD_TYPE_HANDSHAKE)) {
 		return 0;
+	}
 
-	if (rxm->full_len < 1)
+	if (rxm->full_len < 1) {
+		pr_err("%s - %d: TLS_HANDSHAKE_KEYUPDATE\n", __func__, __LINE__);
 		return 0;
+	}
 
 	err = skb_copy_bits(skb, rxm->offset, &hs_type, 1);
 	if (err < 0) {
+		pr_err("%s - %d: TLS_HANDSHAKE_KEYUPDATE\n", __func__, __LINE__);
 		DEBUG_NET_WARN_ON_ONCE(1);
 		return err;
 	}
 
 	if (hs_type == TLS_HANDSHAKE_KEYUPDATE) {
 		struct tls_sw_context_rx *rx_ctx = ctx->priv_ctx_rx;
+
+		pr_err("%s - %d: *** TLS_HANDSHAKE_KEYUPDATE\n", __func__, __LINE__);
 
 		WRITE_ONCE(rx_ctx->key_update_pending, true);
 		TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);
@@ -1772,6 +1790,11 @@ static int tls_rx_one_record(struct sock *sk, struct msghdr *msg,
 	rxm->offset += prot->prepend_size;
 	rxm->full_len -= prot->overhead_size;
 	tls_advance_record_sn(sk, prot, &tls_ctx->rx);
+	pr_err("%s - %d: sk_err: %d\n", __func__, __LINE__, sk->sk_err);
+	tls_clear_err(sk);
+
+	struct tls_sw_context_rx *rx_ctx = tls_ctx->priv_ctx_rx;
+	WRITE_ONCE(rx_ctx->key_update_pending, false);
 
 	return tls_check_pending_rekey(sk, tls_ctx, darg->skb);
 }

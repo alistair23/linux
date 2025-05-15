@@ -77,6 +77,7 @@ struct nlmsghdr *handshake_genl_put(struct sk_buff *msg,
 struct handshake_net *handshake_pernet(struct net *net);
 
 /* request.c */
+void handshake_sk_destruct(struct sock *sk);
 struct handshake_req *handshake_req_alloc(const struct handshake_proto *proto,
 					  gfp_t flags);
 int handshake_req_hash_init(void);
