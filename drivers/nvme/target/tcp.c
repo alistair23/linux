@@ -1859,15 +1859,18 @@ static void nvmet_tcp_tls_handshake_done(void *data, int status,
 {
 	struct nvmet_tcp_queue *queue = data;
 
-	pr_err("queue %d: TLS handshake done, key %x, status %d, state: %d\n",
-		 queue->idx, peerid, status, queue->state);
 	spin_lock_bh(&queue->state_lock);
 	if (WARN_ON(queue->state != NVMET_TCP_Q_TLS_HANDSHAKE)) {
 		spin_unlock_bh(&queue->state_lock);
 		return;
 	}
+
+	pr_err("queue %d: TLS handshake done, key %x / %x, status %d, state: %d\n",
+		 queue->idx, peerid, queue->tls_pskid, status, queue->state);
+
 	if (!status) {
-		queue->tls_pskid = peerid;
+		if (peerid != TLS_NO_PEERID)
+			queue->tls_pskid = peerid;
 		queue->state = NVMET_TCP_Q_CONNECTING;
 	} else
 		queue->state = NVMET_TCP_Q_FAILED;
@@ -1876,7 +1879,7 @@ static void nvmet_tcp_tls_handshake_done(void *data, int status,
 	cancel_delayed_work_sync(&queue->tls_handshake_tmo_work);
 
 	if (!status)
-		status = nvmet_tcp_tls_key_lookup(queue, peerid);
+		status = nvmet_tcp_tls_key_lookup(queue, queue->tls_pskid);
 
 	if (status)
 		nvmet_tcp_schedule_release_queue(queue);

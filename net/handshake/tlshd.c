@@ -99,6 +99,8 @@ static void tls_handshake_done(struct handshake_req *req,
 {
 	struct tls_handshake_req *treq = handshake_req_private(req);
 
+	pr_err("%s - %d\n", __func__, __LINE__);
+
 	treq->th_peerid[0] = TLS_NO_PEERID;
 	if (info)
 		tls_handshake_remote_peerids(treq, info);
@@ -421,8 +423,10 @@ int tls_server_hello_psk(const struct tls_handshake_args *args, gfp_t flags,
 	if (!req)
 		return -ENOMEM;
 	treq = tls_handshake_req_init(req, args);
-	if (keyupdate)
+	if (keyupdate) {
 		treq->th_type = HANDSHAKE_MSG_TYPE_SERVERKEYUPDATE;
+		pr_err("    %s - %d: %d\n", __func__, __LINE__, treq->th_type);
+	}
 	else
 		treq->th_type = HANDSHAKE_MSG_TYPE_SERVERHELLO;
 	treq->th_auth_mode = HANDSHAKE_AUTH_PSK;
