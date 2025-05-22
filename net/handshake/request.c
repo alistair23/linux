@@ -99,6 +99,22 @@ static void handshake_sk_destruct(struct sock *sk)
 }
 
 /**
+ * handshake_sk_destruct_req - destroy an existing request
+ * @sk: socket on which there is an existing request
+ */
+static void handshake_sk_destruct_req(struct sock *sk)
+{
+	struct handshake_req *req;
+
+	req = handshake_req_hash_lookup(sk);
+	if (!req)
+		return;
+
+	trace_handshake_destruct(sock_net(sk), req, sk);
+	handshake_req_destroy(req);
+}
+
+/**
  * handshake_req_alloc - Allocate a handshake request
  * @proto: security protocol
  * @flags: memory allocation flags
