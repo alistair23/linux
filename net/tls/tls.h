@@ -313,6 +313,25 @@ static inline void
 tls_advance_record_sn(struct sock *sk, struct tls_prot_info *prot,
 		      struct cipher_context *ctx)
 {
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
+
+	if (!unlikely(tx_ctx->key_update_pending)) {
+		if (ctx->rec_seq[0] == 255 &&
+			ctx->rec_seq[1] == 255 &&
+			ctx->rec_seq[2] == 255 &&
+			ctx->rec_seq[3] == 255 &&
+			ctx->rec_seq[4] == 255 &&
+			ctx->rec_seq[5] == 255 &&
+			ctx->rec_seq[6] == 255 &&
+			ctx->rec_seq[7] == 245) {
+			/* We are about to overflow the sequence, so send a
+			 * key update.
+			 */
+			WRITE_ONCE(tx_ctx->key_update_pending, true);
+		}
+	}
+
 	if (tls_bigint_increment(ctx->rec_seq, prot->rec_seq_size))
 		tls_err_abort(sk, -EBADMSG);
 
