@@ -1420,6 +1420,8 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 	nvme_stop_keep_alive(&(queue->ctrl->ctrl));
 	flush_work(&(queue->ctrl->ctrl).async_event_work);
 
+	tls_clear_tx_update_pending(queue->sock->sk);
+
 	ret = nvme_tcp_start_tls(&(queue->ctrl->ctrl),
 				 queue, queue->ctrl->ctrl.tls_pskid,
 				 HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED);

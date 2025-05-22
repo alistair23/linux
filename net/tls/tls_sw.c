@@ -1290,7 +1290,14 @@ send_end:
 int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_tx *ctx = tls_sw_ctx_tx(tls_ctx);
 	int ret;
+
+	/* a rekey is pending, let userspace deal with it */
+	if (unlikely(ctx->key_update_pending)) {
+		pr_err(" %s:%d: TX: key_update_pending", __func__, __LINE__);
+		return -EKEYEXPIRED;
+	}
 
 	if (msg->msg_flags & ~(MSG_MORE | MSG_DONTWAIT | MSG_NOSIGNAL |
 			       MSG_CMSG_COMPAT | MSG_SPLICE_PAGES | MSG_EOR |
@@ -1811,6 +1818,8 @@ static int tls_check_pending_rekey(struct sock *sk, struct tls_context *ctx,
 
 	if (hs_type == TLS_HANDSHAKE_KEYUPDATE) {
 		struct tls_sw_context_rx *rx_ctx = ctx->priv_ctx_rx;
+
+		pr_err("**** %s:%d: TLS_HANDSHAKE_KEYUPDATE", __func__, __LINE__);
 
 		WRITE_ONCE(rx_ctx->key_update_pending, true);
 		TLS_INC_STATS(sock_net(sk), LINUX_MIB_TLSRXREKEYRECEIVED);
@@ -2796,11 +2805,15 @@ int init_prot_info(struct tls_prot_info *prot,
 
 static void tls_finish_key_update(struct sock *sk, struct tls_context *tls_ctx)
 {
-	struct tls_sw_context_rx *ctx = tls_ctx->priv_ctx_rx;
+	struct tls_sw_context_rx *rx_ctx = tls_ctx->priv_ctx_rx;
+	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
 
-	WRITE_ONCE(ctx->key_update_pending, false);
+	pr_err("**** %s:%d: Keyupdate finished", __func__, __LINE__);
+
+	WRITE_ONCE(rx_ctx->key_update_pending, false);
+	WRITE_ONCE(tx_ctx->key_update_pending, false);
 	/* wake-up pre-existing poll() */
-	ctx->saved_data_ready(sk);
+	rx_ctx->saved_data_ready(sk);
 }
 
 int tls_set_sw_offload(struct sock *sk, int tx,
