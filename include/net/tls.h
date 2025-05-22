@@ -102,6 +102,7 @@ struct tls_sw_context_tx {
 	struct list_head tx_list;
 	atomic_t encrypt_pending;
 	u8 async_capable:1;
+	bool key_update_pending;
 
 #define BIT_TX_SCHEDULED	0
 #define BIT_TX_CLOSING		1
@@ -135,6 +136,7 @@ struct tls_sw_context_rx {
 	u8 zc_capable:1;
 	u8 reader_contended:1;
 	bool key_update_pending;
+	bool key_update_request_update;
 
 	struct tls_strparser strp;
 
@@ -511,6 +513,14 @@ static inline bool tls_is_tx_update_pending(struct sock *sk)
 	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
 
 	return READ_ONCE(tx_ctx->key_update_pending);
+}
+
+static inline bool tls_is_rx_request_update(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_rx *rx_ctx = tls_ctx->priv_ctx_rx;
+
+	return READ_ONCE(rx_ctx->key_update_request_update);
 }
 
 #ifdef CONFIG_TLS_DEVICE

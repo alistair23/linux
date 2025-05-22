@@ -1443,10 +1443,22 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 	int qid = nvme_tcp_queue_id(queue);
 	int ret;
 	bool tx_update = tls_is_tx_update_pending(queue->sock->sk);
-	handshake_key_update_type update_type = tx_update ? HANDSHAKE_KEY_UPDATE_TYPE_SEND : HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
+	enum handshake_key_update_type update_type;
+
+	if (tx_update)
+		update_type = HANDSHAKE_KEY_UPDATE_TYPE_SEND;
+	else {
+		if (tls_is_rx_request_update(queue->sock->sk))
+			update_type = HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED_REQUEST_UPDATE;
+		else
+			update_type = HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
+	}
 
 	dev_dbg(queue->ctrl->ctrl.device,
 		"updating key for queue %d\n", qid);
+
+
+	tls_clear_tx_update_pending(queue->sock->sk);
 
 	ret = nvme_tcp_start_tls(&(queue->ctrl->ctrl),
 				 queue, queue->ctrl->ctrl.tls_pskid,

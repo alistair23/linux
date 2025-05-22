@@ -1194,12 +1194,23 @@ static int update_tls_keys(struct nvmet_tcp_queue *queue)
 {
 	int ret;
 	bool tx_update = tls_is_tx_update_pending(queue->sock->sk);
-	handshake_key_update_type update_type = tx_update ? HANDSHAKE_KEY_UPDATE_TYPE_SEND : HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
+	enum handshake_key_update_type update_type;
+
+	if (tx_update)
+		update_type = HANDSHAKE_KEY_UPDATE_TYPE_SEND;
+	else {
+		if (tls_is_rx_request_update(queue->sock->sk))
+			update_type = HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED_REQUEST_UPDATE;
+		else
+			update_type = HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
+	}
 
 	cancel_work(&queue->io_work);
 	queue->state = NVMET_TCP_Q_TLS_HANDSHAKE;
 
 	nvmet_tcp_restore_socket_callbacks(queue);
+
+	tls_clear_tx_update_pending(queue->sock->sk);
 
 	INIT_DELAYED_WORK(&queue->tls_handshake_tmo_work,
 			  nvmet_tcp_tls_handshake_timeout);
