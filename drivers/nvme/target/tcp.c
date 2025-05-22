@@ -1143,6 +1143,8 @@ static int update_tls_keys(struct nvmet_tcp_queue *queue)
 
 	nvmet_stop_keep_alive_timer(queue->nvme_sq.ctrl);
 
+	tls_clear_tx_update_pending(queue->sock->sk);
+
 	INIT_DELAYED_WORK(&queue->tls_handshake_tmo_work,
 			  nvmet_tcp_tls_handshake_timeout);
 
