@@ -100,6 +100,7 @@ struct tls_sw_context_tx {
 	struct list_head tx_list;
 	atomic_t encrypt_pending;
 	u8 async_capable:1;
+	bool key_update_pending;
 
 #define BIT_TX_SCHEDULED	0
 #define BIT_TX_CLOSING		1
@@ -498,6 +499,14 @@ static inline void tls_clear_err(struct sock *sk)
 	WRITE_ONCE(sk->sk_err, 0);
 	/* Paired with smp_rmb() in tcp_poll() */
 	smp_wmb();
+}
+
+static inline void tls_clear_tx_update_pending(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
+
+	WRITE_ONCE(tx_ctx->key_update_pending, false);
 }
 
 #ifdef CONFIG_TLS_DEVICE
