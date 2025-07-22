@@ -122,6 +122,11 @@ struct tls_rec {
 	struct scatterlist sg_aead_out[2];
 
 	char content_type;
+
+	/* TLS 1.3 Record Padding */
+	u16 padding_len;
+	u8 *padding_buf;
+
 	struct scatterlist sg_content_type;
 
 	struct sock *sk;
