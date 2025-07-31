@@ -194,7 +194,9 @@ retry:
 		bvec_set_page(&bvec, p, size, offset);
 		iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bvec, 1, size);
 
+		pr_err("    %s:%d: tcp_sendmsg_locked: size: %d", __func__, __LINE__, size);
 		ret = tcp_sendmsg_locked(sk, &msg, size);
+		pr_err("    %s:%d: tcp_sendmsg_locked: ret: %d", __func__, __LINE__, ret);
 
 		if (ret != size) {
 			if (ret > 0) {
@@ -278,6 +280,8 @@ int tls_push_partial_record(struct sock *sk, struct tls_context *ctx,
 
 	sg = ctx->partially_sent_record;
 	offset = ctx->partially_sent_offset;
+
+	pr_err("   %s:%d: tls_push_partial_record: offset: %d", __func__, __LINE__, offset);
 
 	ctx->partially_sent_record = NULL;
 	return tls_push_sg(sk, ctx, sg, offset, flags);

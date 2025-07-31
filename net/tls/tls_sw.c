@@ -421,7 +421,9 @@ int tls_tx_records(struct sock *sk, int flags)
 		else
 			tx_flags = flags;
 
+		pr_err("  %s:%d: tls_push_partial_record: tx_flags: %d", __func__, __LINE__, tx_flags);
 		rc = tls_push_partial_record(sk, tls_ctx, tx_flags);
+		pr_err("  %s:%d: tls_push_partial_record: rc: %d", __func__, __LINE__, rc);
 		if (rc)
 			goto tx_err;
 
@@ -442,9 +444,11 @@ int tls_tx_records(struct sock *sk, int flags)
 				tx_flags = flags;
 
 			msg_en = &rec->msg_encrypted;
+			pr_err("  %s:%d: tls_push_sg: tx_flags: %d", __func__, __LINE__, tx_flags);
 			rc = tls_push_sg(sk, tls_ctx,
 					 &msg_en->sg.data[msg_en->sg.curr],
 					 0, tx_flags);
+			pr_err("  %s:%d: tls_push_sg: rc: %d", __func__, __LINE__, rc);
 			if (rc)
 				goto tx_err;
 
@@ -1032,6 +1036,8 @@ static int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,
 	int orig_size;
 	int ret = 0;
 
+	pr_err(" %s:%d: trying to send: %d", __func__, __LINE__, size);
+
 	if (!eor && (msg->msg_flags & MSG_EOR))
 		return -EINVAL;
 
@@ -1066,11 +1072,13 @@ static int tls_sw_sendmsg_locked(struct sock *sk, struct msghdr *msg,
 		orig_size = msg_pl->sg.size;
 		full_record = false;
 		try_to_copy = msg_data_left(msg);
+		pr_err(" %s:%d: try_to_copy: %d", __func__, __LINE__, try_to_copy);
 		record_room = TLS_MAX_PAYLOAD_SIZE - msg_pl->sg.size;
 		if (try_to_copy >= record_room) {
 			try_to_copy = record_room;
 			full_record = true;
 		}
+		pr_err(" %s:%d: try_to_copy: %d", __func__, __LINE__, try_to_copy);
 
 		required_size = msg_pl->sg.size + try_to_copy +
 				prot->overhead_size;
@@ -1089,12 +1097,14 @@ alloc_encrypted:
 			 * to max sg elements limit
 			 */
 			try_to_copy -= required_size - msg_en->sg.size;
+			pr_err(" %s:%d: try_to_copy: %d", __func__, __LINE__, try_to_copy);
 			full_record = true;
 		}
 
 		if (try_to_copy && (msg->msg_flags & MSG_SPLICE_PAGES)) {
 			ret = tls_sw_sendmsg_splice(sk, msg, msg_pl,
 						    try_to_copy, &copied);
+			pr_err(" %s:%d: tls_sw_sendmsg_splice: %d", __func__, __LINE__, ret);
 			if (ret < 0)
 				goto send_end;
 			tls_ctx->pending_open_record_frags = true;
@@ -1112,6 +1122,7 @@ alloc_encrypted:
 
 			ret = sk_msg_zerocopy_from_iter(sk, &msg->msg_iter,
 							msg_pl, try_to_copy);
+			pr_err(" %s:%d: sk_msg_zerocopy_from_iter: %d", __func__, __LINE__, ret);
 			if (ret)
 				goto fallback_to_reg_send;
 

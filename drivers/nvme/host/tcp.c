@@ -1240,6 +1240,7 @@ static int nvme_tcp_try_send_data_pdu(struct nvme_tcp_request *req)
 {
 	struct nvme_tcp_queue *queue = req->queue;
 	struct nvme_tcp_data_pdu *pdu = nvme_tcp_req_data_pdu(req);
+	int qid = nvme_tcp_queue_id(queue);
 	struct bio_vec bvec;
 	struct msghdr msg = { .msg_flags = MSG_DONTWAIT | MSG_MORE, };
 	u8 hdgst = nvme_tcp_hdgst_len(queue);
@@ -1252,11 +1253,17 @@ static int nvme_tcp_try_send_data_pdu(struct nvme_tcp_request *req)
 	if (!req->h2cdata_left)
 		msg.msg_flags |= MSG_SPLICE_PAGES;
 
+	dev_err(queue->ctrl->ctrl.device,
+		"qid: %d: NVME_TCP_SEND_H2C_PDU: start sock_sendmsg: len: %d\n", qid, len);
+
 	bvec_set_virt(&bvec, (void *)pdu + req->offset, len);
 	iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bvec, 1, len);
 	ret = sock_sendmsg(queue->sock, &msg);
 	if (unlikely(ret <= 0))
 		return ret;
+
+	dev_err(queue->ctrl->ctrl.device,
+		"qid: %d: NVME_TCP_SEND_H2C_PDU: end sock_sendmsg: ret: %d\n", qid, ret);
 
 	len -= ret;
 	if (!len) {
@@ -2638,7 +2645,7 @@ static enum blk_eh_timer_return nvme_tcp_timeout(struct request *rq)
 	struct nvme_command *cmd = &pdu->cmd;
 	int qid = nvme_tcp_queue_id(req->queue);
 
-	dev_warn(ctrl->device,
+	dev_err(ctrl->device,
 		 "I/O tag %d (%04x) type %d opcode %#x (%s) QID %d timeout\n",
 		 rq->tag, nvme_cid(rq), pdu->hdr.type, cmd->common.opcode,
 		 nvme_fabrics_opcode_str(qid, cmd), qid);
