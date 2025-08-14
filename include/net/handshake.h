@@ -54,6 +54,7 @@ bool handshake_req_cancel(struct sock *sk);
 void handshake_sk_destruct_req(struct sock *sk);
 
 u8 tls_get_record_type(const struct sock *sk, const struct cmsghdr *msg);
+u8 tls_get_handshake_type(const struct sock *sk, const struct cmsghdr *cmsg);
 void tls_alert_recv(const struct sock *sk, const struct msghdr *msg,
 		    u8 *level, u8 *description);
 

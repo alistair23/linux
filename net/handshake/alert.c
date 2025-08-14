@@ -87,6 +87,32 @@ u8 tls_get_record_type(const struct sock *sk, const struct cmsghdr *cmsg)
 EXPORT_SYMBOL(tls_get_record_type);
 
 /**
+ * tls_get_handshake_type - Look for TLS HANDSHAKE_TYPE information
+ * @sk: socket (for IP address information)
+ * @cmsg: incoming message to be parsed
+ *
+ * Returns zero or a TLS_HANDSHAKE_TYPE value.
+ */
+u8 tls_get_handshake_type(const struct sock *sk, const struct cmsghdr *cmsg)
+{
+	u8 record_type, msg_type;
+
+	if (cmsg->cmsg_level != SOL_TLS)
+		return 0;
+	if (cmsg->cmsg_type != TLS_GET_RECORD_TYPE)
+		return 0;
+
+	record_type = *((u8 *)CMSG_DATA(cmsg));
+
+	if (record_type != TLS_RECORD_TYPE_HANDSHAKE)
+		return 0;
+
+	msg_type = *((u8 *)CMSG_DATA(cmsg) + 4);
+	return msg_type;
+}
+EXPORT_SYMBOL(tls_get_handshake_type);
+
+/**
  * tls_alert_recv - Parse TLS Alert messages
  * @sk: socket (for IP address information)
  * @msg: incoming message to be parsed
