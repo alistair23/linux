@@ -1130,6 +1130,7 @@ static int update_tls_keys(struct nvmet_tcp_queue *queue)
 {
 	int ret;
 
+	tls_clear_err(queue->sock->sk);
 	cancel_work(&queue->io_work);
 	handshake_req_cancel(queue->sock->sk);
 	handshake_sk_destruct_req(queue->sock->sk);

@@ -1385,6 +1385,7 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 	dev_dbg(queue->ctrl->ctrl.device,
 		"updating key for queue %d\n", qid);
 
+	tls_clear_err(queue->sock->sk);
 	cancel_work(&queue->io_work);
 	handshake_req_cancel(queue->sock->sk);
 	handshake_sk_destruct_req(queue->sock->sk);
