@@ -1412,8 +1412,8 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 	int qid = nvme_tcp_queue_id(queue);
 	int ret;
 
-	dev_dbg(queue->ctrl->ctrl.device,
-		"updating key for queue %d\n", qid);
+	dev_err(queue->ctrl->ctrl.device,
+		"updating key for queue %d, %d\n", qid, update_type);
 
 	cancel_work(&queue->io_work);
 
@@ -1809,7 +1809,7 @@ static void nvme_tcp_set_queue_io_cpu(struct nvme_tcp_queue *queue)
 		set_bit(NVME_TCP_Q_IO_CPU_SET, &queue->flags);
 	}
 out:
-	dev_dbg(ctrl->ctrl.device, "queue %d: using cpu %d\n",
+	dev_err(ctrl->ctrl.device, "queue %d: using cpu %d\n",
 		qid, queue->io_cpu);
 }
 
@@ -1821,7 +1821,7 @@ static void nvme_tcp_tls_done(void *data, int status, key_serial_t pskid,
 	int qid = nvme_tcp_queue_id(queue);
 	struct key *tls_key;
 
-	dev_dbg(ctrl->ctrl.device, "queue %d: TLS handshake done, key %x, status %d\n",
+	dev_err(ctrl->ctrl.device, "queue %d: TLS handshake done, key %x, status %d\n",
 		qid, pskid, status);
 
 	if (status) {
@@ -1858,7 +1858,7 @@ static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
 	unsigned long tmo = tls_handshake_timeout * HZ;
 	key_serial_t keyring = nvme_keyring_id();
 
-	dev_dbg(nctrl->device, "queue %d: start TLS with key %x\n",
+	dev_err(nctrl->device, "queue %d: start TLS with key %x\n",
 		qid, pskid);
 	memset(&args, 0, sizeof(args));
 	args.ta_sock = queue->sock;
@@ -1894,7 +1894,7 @@ static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
 				"queue %d: TLS handshake complete, error %d\n",
 				qid, queue->tls_err);
 		} else {
-			dev_dbg(nctrl->device,
+			dev_err(nctrl->device,
 				"queue %d: TLS handshake complete\n", qid);
 		}
 		ret = queue->tls_err;
@@ -2010,7 +2010,7 @@ static int nvme_tcp_alloc_queue(struct nvme_ctrl *nctrl, int qid,
 		goto err_sock;
 	}
 
-	dev_dbg(nctrl->device, "connecting queue %d\n",
+	dev_err(nctrl->device, "connecting queue %d\n",
 			nvme_tcp_queue_id(queue));
 
 	ret = kernel_connect(queue->sock, (struct sockaddr *)&ctrl->addr,
@@ -2433,7 +2433,7 @@ static void nvme_tcp_teardown_admin_queue(struct nvme_ctrl *ctrl,
 	}
 	nvme_tcp_free_admin_queue(ctrl);
 	if (ctrl->tls_pskid) {
-		dev_dbg(ctrl->device, "Wipe negotiated TLS_PSK %08x\n",
+		dev_err(ctrl->device, "Wipe negotiated TLS_PSK %08x\n",
 			ctrl->tls_pskid);
 		ctrl->tls_pskid = 0;
 	}
@@ -2510,7 +2510,7 @@ static int nvme_tcp_setup_ctrl(struct nvme_ctrl *ctrl, bool new)
 
 	if (ctrl->opts->concat && !ctrl->tls_pskid) {
 		/* See comments for nvme_tcp_key_revoke_needed() */
-		dev_dbg(ctrl->device, "restart admin queue for secure concatenation\n");
+		dev_err(ctrl->device, "restart admin queue for secure concatenation\n");
 		nvme_stop_keep_alive(ctrl);
 		nvme_tcp_teardown_admin_queue(ctrl, false);
 		ret = nvme_tcp_configure_admin_queue(ctrl, false);
