@@ -1411,6 +1411,8 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 {
 	int qid = nvme_tcp_queue_id(queue);
 	int ret;
+	bool tx_update = tls_is_tx_update_pending(queue->sock->sk);
+	handshake_key_update_type update_type = tx_update ? HANDSHAKE_KEY_UPDATE_TYPE_SEND : HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
 
 	dev_err(queue->ctrl->ctrl.device,
 		"updating key for queue %d, %d\n", qid, update_type);
@@ -1424,7 +1426,7 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 
 	ret = nvme_tcp_start_tls(&(queue->ctrl->ctrl),
 				 queue, queue->ctrl->ctrl.tls_pskid,
-				 HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED);
+				 update_type);
 
 	if (ret < 0) {
 		dev_err(queue->ctrl->ctrl.device,
