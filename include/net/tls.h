@@ -497,6 +497,22 @@ static inline bool tls_offload_tx_resync_pending(struct sock *sk)
 
 struct sk_buff *tls_encrypt_skb(struct sk_buff *skb);
 
+static inline void tls_clear_tx_update_pending(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
+
+	WRITE_ONCE(tx_ctx->key_update_pending, false);
+}
+
+static inline bool tls_is_tx_update_pending(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
+
+	return READ_ONCE(tx_ctx->key_update_pending);
+}
+
 #ifdef CONFIG_TLS_DEVICE
 void tls_device_sk_destruct(struct sock *sk);
 void tls_offload_tx_resync_request(struct sock *sk, u32 got_seq, u32 exp_seq);

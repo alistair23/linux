@@ -861,6 +861,8 @@ static int nvmet_tcp_try_send(struct nvmet_tcp_queue *queue,
 	for (i = 0; i < budget; i++) {
 		ret = nvmet_tcp_try_send_one(queue, i == budget - 1);
 		if (unlikely(ret < 0)) {
+			if (nvmet_tls_key_expired(queue, ret))
+					goto done;
 			nvmet_tcp_socket_error(queue, ret);
 			goto done;
 		} else if (ret == 0) {
@@ -1191,6 +1193,8 @@ static void nvmet_tcp_tls_handshake_timeout(struct work_struct *w)
 static int update_tls_keys(struct nvmet_tcp_queue *queue)
 {
 	int ret;
+	bool tx_update = tls_is_tx_update_pending(queue->sock->sk);
+	handshake_key_update_type update_type = tx_update ? HANDSHAKE_KEY_UPDATE_TYPE_SEND : HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
 
 	cancel_work(&queue->io_work);
 	queue->state = NVMET_TCP_Q_TLS_HANDSHAKE;
@@ -1200,7 +1204,7 @@ static int update_tls_keys(struct nvmet_tcp_queue *queue)
 	INIT_DELAYED_WORK(&queue->tls_handshake_tmo_work,
 			  nvmet_tcp_tls_handshake_timeout);
 
-	ret = nvmet_tcp_tls_handshake(queue, HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED);
+	ret = nvmet_tcp_tls_handshake(queue, update_type);
 
 	if (ret < 0)
 		return ret;
@@ -1514,8 +1518,12 @@ static void nvmet_tcp_io_work(struct work_struct *w)
 		ret = nvmet_tcp_try_send(queue, NVMET_TCP_SEND_BUDGET, &ops);
 		if (ret > 0)
 			pending = true;
-		else if (ret < 0)
+		else if (ret < 0) {
+			if (ret == -EKEYEXPIRED)
+				break;
+
 			return;
+		}
 
 	} while (pending && ops < NVMET_TCP_IO_WORK_BUDGET);
 

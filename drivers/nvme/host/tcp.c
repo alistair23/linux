@@ -212,6 +212,7 @@ static int nvme_tcp_start_tls(struct nvme_ctrl *nctrl,
 			      struct nvme_tcp_queue *queue,
 			      key_serial_t pskid,
 			      enum handshake_key_update_type keyupdate);
+static void update_tls_keys(struct nvme_tcp_queue *queue);
 
 static inline struct nvme_tcp_ctrl *to_tcp_ctrl(struct nvme_ctrl *ctrl)
 {
@@ -395,6 +396,14 @@ static inline void nvme_tcp_send_all(struct nvme_tcp_queue *queue)
 	do {
 		ret = nvme_tcp_try_send(queue);
 	} while (ret > 0);
+
+	if (ret == -EKEYEXPIRED) {
+		update_tls_keys(queue);
+
+		do {
+			ret = nvme_tcp_try_send(queue);
+		} while (ret > 0);
+	}
 }
 
 static inline bool nvme_tcp_queue_has_pending(struct nvme_tcp_queue *queue)
@@ -1378,6 +1387,8 @@ static int nvme_tcp_try_send(struct nvme_tcp_queue *queue)
 done:
 	if (ret == -EAGAIN) {
 		ret = 0;
+	} else if (ret == -EKEYEXPIRED) {
+		goto out;
 	} else if (ret < 0) {
 		dev_err(queue->ctrl->ctrl.device,
 			"failed to send request %d\n", ret);
@@ -1431,13 +1442,15 @@ static void update_tls_keys(struct nvme_tcp_queue *queue)
 {
 	int qid = nvme_tcp_queue_id(queue);
 	int ret;
+	bool tx_update = tls_is_tx_update_pending(queue->sock->sk);
+	handshake_key_update_type update_type = tx_update ? HANDSHAKE_KEY_UPDATE_TYPE_SEND : HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED;
 
 	dev_dbg(queue->ctrl->ctrl.device,
 		"updating key for queue %d\n", qid);
 
 	ret = nvme_tcp_start_tls(&(queue->ctrl->ctrl),
 				 queue, queue->ctrl->ctrl.tls_pskid,
-				 HANDSHAKE_KEY_UPDATE_TYPE_RECEIVED);
+				 update_type);
 
 	if (ret < 0) {
 		dev_err(queue->ctrl->ctrl.device,
@@ -1461,8 +1474,11 @@ static void nvme_tcp_io_work(struct work_struct *w)
 			mutex_unlock(&queue->send_mutex);
 			if (result > 0)
 				pending = true;
-			else if (unlikely(result < 0))
+			else if (unlikely(result < 0)) {
+				if (result == -EKEYEXPIRED)
+					update_tls_keys(queue);
 				break;
+			}
 		}
 
 		result = nvme_tcp_try_recvmsg(queue);
