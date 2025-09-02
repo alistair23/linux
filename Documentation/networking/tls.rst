@@ -280,6 +280,18 @@ If the record decrypted turns out to had been padded or is not a data
 record it will be decrypted again into a kernel buffer without zero copy.
 Such events are counted in the ``TlsDecryptRetry`` statistic.
 
+TLS_TX_RECORD_SIZE_LIM
+~~~~~~~~~~~~~~~~~~~~~~
+
+Sets the maximum size for the plaintext of a protected record.
+
+The provided value should correspond to the limit negotiated during the TLS
+handshake via the `record_size_limit` extension (RFC 8449)[1]. When this
+option is set, the kernel enforces this limit on all transmitted TLS records,
+ensuring no plaintext fragment exceeds the specified size.
+
+[1] https://datatracker.ietf.org/doc/html/rfc8449
+
 Statistics
 ==========
 
