@@ -499,6 +499,14 @@ static inline bool tls_offload_tx_resync_pending(struct sock *sk)
 
 struct sk_buff *tls_encrypt_skb(struct sk_buff *skb);
 
+static inline void tls_set_tx_update_pending(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context_tx *tx_ctx = tls_ctx->priv_ctx_tx;
+
+	WRITE_ONCE(tx_ctx->key_update_pending, true);
+}
+
 static inline void tls_clear_tx_update_pending(struct sock *sk)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
