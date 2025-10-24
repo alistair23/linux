@@ -246,6 +246,31 @@ static ssize_t nuse_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RO(nuse);
 
+static ssize_t nvme_sysfs_replace_psk(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct nvme_ctrl *ctrl = dev_get_drvdata(dev);
+	int qid, error;
+
+	error = kstrtoint(buf, 10, &qid);
+	if (error)
+		return error;
+
+	if (qid >= ctrl->queue_count)
+		return -EINVAL;
+
+	error = nvme_auth_negotiate(ctrl, qid);
+	if (error < 0)
+		return error;
+
+	error = nvme_auth_wait(ctrl, qid);
+	if (error < 0)
+		return error;
+
+	return count;
+}
+static DEVICE_ATTR(replace_psk, S_IWUSR, NULL, nvme_sysfs_replace_psk);
+
 static struct attribute *nvme_ns_attrs[] = {
 	&dev_attr_wwid.attr,
 	&dev_attr_uuid.attr,
@@ -747,6 +772,7 @@ static struct attribute *nvme_dev_attrs[] = {
 	&dev_attr_dhchap_ctrl_secret.attr,
 #endif
 	&dev_attr_adm_passthru_err_log_enabled.attr,
+	&dev_attr_replace_psk.attr,
 	NULL
 };
 
@@ -776,6 +802,10 @@ static umode_t nvme_dev_attrs_are_visible(struct kobject *kobj,
 	if (a == &dev_attr_dhchap_ctrl_secret.attr && !ctrl->opts)
 		return 0;
 #endif
+	if (a == &dev_attr_replace_psk.attr) {
+		if (!ctrl->opts || !ctrl->opts->concat)
+			return 0;
+	}
 
 	return a->mode;
 }
