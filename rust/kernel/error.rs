@@ -12,6 +12,7 @@ use crate::{
     str::CStr,
 };
 
+use core::ffi::FromBytesWithNulError;
 use core::num::NonZeroI32;
 use core::num::TryFromIntError;
 use core::str::Utf8Error;
@@ -248,6 +249,12 @@ impl From<fmt::Error> for Error {
 impl From<core::convert::Infallible> for Error {
     fn from(e: core::convert::Infallible) -> Error {
         match e {}
+    }
+}
+
+impl From<FromBytesWithNulError> for Error {
+    fn from(_: FromBytesWithNulError) -> Error {
+        code::EINVAL
     }
 }
 
