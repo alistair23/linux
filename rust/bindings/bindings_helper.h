@@ -34,6 +34,7 @@
 #include <drm/drm_file.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_ioctl.h>
+#include <crypto/hash.h>
 #include <kunit/test.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/bitmap.h>
@@ -60,6 +61,7 @@
 #include <linux/fs.h>
 #include <linux/i2c.h>
 #include <linux/ioport.h>
+#include <linux/hash.h>
 #include <linux/jiffies.h>
 #include <linux/jump_label.h>
 #include <linux/mdio.h>
