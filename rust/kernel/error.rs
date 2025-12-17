@@ -12,9 +12,14 @@ use crate::{
     str::CStr,
 };
 
-use core::num::NonZeroI32;
-use core::num::TryFromIntError;
-use core::str::Utf8Error;
+use core::{
+    ffi::FromBytesWithNulError,
+    num::{
+        NonZeroI32,
+        TryFromIntError, //
+    },
+    str::Utf8Error, //
+};
 
 /// Contains the C-compatible error codes.
 #[rustfmt::skip]
@@ -355,6 +360,13 @@ impl From<core::convert::Infallible> for Error {
     #[inline]
     fn from(e: core::convert::Infallible) -> Error {
         match e {}
+    }
+}
+
+impl From<FromBytesWithNulError> for Error {
+    #[inline]
+    fn from(_: FromBytesWithNulError) -> Error {
+        code::EINVAL
     }
 }
 
