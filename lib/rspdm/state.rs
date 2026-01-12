@@ -1038,6 +1038,36 @@ impl SpdmState {
             };
         }
 
+        let spdm_context = b"responder-challenge_auth signing";
+
+        let hash_digest_size = if self.base_hash_alg < bindings::hash_algo_HASH_ALGO__LAST {
+            // SAFETY: `base_hash_alg` is a valid offset into `hash_digest_size`
+            (unsafe { bindings::get_hash_digest_size(self.base_hash_alg) }) as usize
+        } else {
+            to_result(-(bindings::EIO as i32))?;
+            0
+        };
+
+        let req_nonce_off = self.transcript.len() + core::mem::offset_of!(ChallengeReq, nonce);
+        let rsp_nonce_off =
+            self.transcript.len() + core::mem::size_of::<ChallengeRsp>() + hash_digest_size;
+
+        unsafe {
+            bindings::spdm_netlink_sig_event(
+                self.dev,
+                self.version,
+                &mut self.transcript as *mut _ as *mut c_void,
+                self.transcript.len(),
+                self.base_hash_alg,
+                self.sig_len,
+                0x03,
+                slot,
+                req_nonce_off,
+                rsp_nonce_off,
+                spdm_context as *const _ as *const u8,
+            );
+        }
+
         Ok(())
     }
 }

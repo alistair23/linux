@@ -2,13 +2,14 @@
 /* Do not edit directly, auto-generated from: */
 /*	Documentation/netlink/specs/spdm.yaml */
 /* YNL-GEN kernel source */
+/* To regenerate run: tools/net/ynl/ynl-regen.sh */
 
 #include <net/netlink.h>
 #include <net/genetlink.h>
 
+#include "netlink-autogen.h"
+
 #include <uapi/linux/spdm_netlink.h>
-#include <netlink-autogen.h>
-#include <uapi/linux/spdm.h>
 #include <uapi/linux/hash_info.h>
 
 /* Ops table for spdm */

@@ -8,10 +8,49 @@
  * Copyright (C) 2025 Intel Corporation
  */
 
+#include "netlink-autogen.h"
+
+#include <linux/bitfield.h>
+#include <linux/mutex.h>
+#include <linux/spdm.h>
+
+#include <crypto/hash_info.h>
+
 #include "spdm.h"
 
-int spdm_netlink_sig_event(struct spdm_state *spdm_state,
-			   enum spdm_reqrsp_code rsp_code, u8 slot,
+#define SPDM_NONCE_SZ 32 /* SPDM 1.0.0 table 20 */
+#define SPDM_PREFIX_SZ 64 /* SPDM 1.2.0 margin no 803 */
+#define SPDM_COMBINED_PREFIX_SZ 100 /* SPDM 1.2.0 margin no 806 */
+#define SPDM_MAX_OPAQUE_DATA 1024 /* SPDM 1.0.0 table 21 */
+
+static void spdm_create_combined_prefix(u8 version, const char *spdm_context,
+					void *buf)
+{
+	u8 major = FIELD_GET(0xf0, version);
+	u8 minor = FIELD_GET(0x0f, version);
+	size_t len = strlen(spdm_context);
+	int rc, zero_pad;
+
+	rc = snprintf(buf, SPDM_PREFIX_SZ + 1,
+		      "dmtf-spdm-v%hhx.%hhx.*dmtf-spdm-v%hhx.%hhx.*"
+		      "dmtf-spdm-v%hhx.%hhx.*dmtf-spdm-v%hhx.%hhx.*",
+		      major, minor, major, minor, major, minor, major, minor);
+	WARN_ON(rc != SPDM_PREFIX_SZ);
+
+	zero_pad = SPDM_COMBINED_PREFIX_SZ - SPDM_PREFIX_SZ - 1 - len;
+	WARN_ON(zero_pad < 0);
+
+	memset(buf + SPDM_PREFIX_SZ + 1, 0, zero_pad);
+	memcpy(buf + SPDM_PREFIX_SZ + 1 + zero_pad, spdm_context, len);
+}
+
+int spdm_netlink_sig_event(struct device *dev,
+			   u8 version,
+			   void *transcript,
+			   size_t transcript_len,
+			   enum hash_algo base_hash_alg,
+			   size_t sig_len,
+			   int rsp_code, u8 slot,
 			   size_t req_nonce_off, size_t rsp_nonce_off,
 			   const char *spdm_context)
 {
@@ -24,12 +63,12 @@ int spdm_netlink_sig_event(struct spdm_state *spdm_state,
 	if (!genl_has_listeners(&spdm_nl_family, &init_net, SPDM_NLGRP_SIG))
 		return 0;
 
-	char *devpath __free(kfree) = kobject_get_path(&spdm_state->dev->kobj,
+	char *devpath __free(kfree) = kobject_get_path(&dev->kobj,
 						       GFP_KERNEL);
 	if (!devpath)
 		return -ENOMEM;
 
-	nr_pages = spdm_state->transcript_max / PAGE_SIZE;
+	nr_pages = transcript_len / PAGE_SIZE;
 	nr_msgs = DIV_ROUND_UP(nr_pages, MAX_SKB_FRAGS);
 
 	/* Calculate exact size to avoid reallocation by netlink_trim() */
@@ -59,17 +98,16 @@ int spdm_netlink_sig_event(struct spdm_state *spdm_state,
 	    nla_put_u8(msg, SPDM_A_SIG_RSP_CODE, rsp_code) ||
 	    nla_put_u8(msg, SPDM_A_SIG_SLOT, slot) ||
 	    nla_put_u16(msg, SPDM_A_SIG_HASH_ALGO,
-			spdm_state->base_hash_alg) ||
+			base_hash_alg) ||
 	    nla_put_u32(msg, SPDM_A_SIG_SIG_OFFSET,
-			spdm_state->transcript_end - spdm_state->transcript -
-		        spdm_state->sig_len) ||
+			transcript_len - sig_len) ||
 	    nla_put_u32(msg, SPDM_A_SIG_REQ_NONCE_OFFSET, req_nonce_off) ||
 	    nla_put_u32(msg, SPDM_A_SIG_RSP_NONCE_OFFSET, rsp_nonce_off)) {
 		rc = -EMSGSIZE;
 		goto err_cancel_msg;
 	}
 
-	if (spdm_state->version >= 0x12) {
+	if (version >= 0x12) {
 		nla = nla_reserve(msg, SPDM_A_SIG_COMBINED_SPDM_PREFIX,
 				  SPDM_COMBINED_PREFIX_SZ);
 		if (!nla) {
@@ -77,11 +115,11 @@ int spdm_netlink_sig_event(struct spdm_state *spdm_state,
 			goto err_cancel_msg;
 		}
 
-		spdm_create_combined_prefix(spdm_state->version, spdm_context,
+		spdm_create_combined_prefix(version, spdm_context,
 					    nla_data(nla));
 	}
 
-	ptr = spdm_state->transcript;
+	ptr = transcript;
 
 	/* Loop over Netlink messages - break condition is in loop body */
 	for (seq = 1; ; seq++) {
@@ -96,14 +134,15 @@ int spdm_netlink_sig_event(struct spdm_state *spdm_state,
 		nr_pages -= nr_frags;
 
 		/* Loop over fragments of this Netlink message */
+		size_t remainder = transcript_len;
 		for (i = 0; i < nr_frags; i++) {
 			struct page *page = vmalloc_to_page(ptr);
-			size_t remainder = spdm_state->transcript_end - ptr;
 			size_t sz = min(remainder, PAGE_SIZE);
 
 			get_page(page);
 			skb_add_rx_frag(msg, i, page, 0, sz, sz);
 			ptr += PAGE_SIZE;
+			transcript_len -= PAGE_SIZE;
 		}
 
 		genlmsg_end(msg, hdr);

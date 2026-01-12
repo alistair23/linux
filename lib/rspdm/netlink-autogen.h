@@ -2,6 +2,7 @@
 /* Do not edit directly, auto-generated from: */
 /*	Documentation/netlink/specs/spdm.yaml */
 /* YNL-GEN kernel header */
+/* To regenerate run: tools/net/ynl/ynl-regen.sh */
 
 #ifndef _LINUX_SPDM_GEN_H
 #define _LINUX_SPDM_GEN_H
@@ -10,8 +11,6 @@
 #include <net/genetlink.h>
 
 #include <uapi/linux/spdm_netlink.h>
-#include <netlink-autogen.h>
-#include <uapi/linux/spdm.h>
 #include <uapi/linux/hash_info.h>
 
 enum {

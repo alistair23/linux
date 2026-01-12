@@ -26,7 +26,6 @@ definitions:
         name: key-exchange-rsp
       -
         name: finish
-    header: uapi/linux/spdm.h
   -
     type: enum
     name: hash-algo
@@ -132,6 +131,3 @@ mcast-groups:
   list:
     -
       name: sig
-
-kernel-family:
-  headers: [ "netlink-autogen.h"]
