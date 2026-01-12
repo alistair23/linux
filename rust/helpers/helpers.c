@@ -61,6 +61,7 @@
 #include "drm.c"
 #include "err.c"
 #include "hash.c"
+#include "hash_info.c"
 #include "irq.c"
 #include "fs.c"
 #include "gpu.c"
