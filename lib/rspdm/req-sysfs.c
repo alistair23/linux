@@ -11,6 +11,7 @@
  */
 
 #include <linux/pci.h>
+#include "spdm.h"
 
 int rust_authenticated_show(void *spdm_state, char *buf);
 
@@ -64,7 +65,8 @@ static ssize_t authenticated_store(struct device *dev,
 		return PTR_ERR(spdm_state);
 
 	if (sysfs_streq(buf, "re")) {
-		rc = spdm_authenticate(spdm_state);
+		pr_err("Calling spdm_chall");
+		rc = spdm_chall(spdm_state);
 		if (rc)
 			return rc;
 	} else {

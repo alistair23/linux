@@ -17,8 +17,10 @@
 #ifdef CONFIG_NET
 int spdm_netlink_sig_event(struct device *dev,
 			   u8 version,
-			   void *transcript,
+			   const void *transcript,
 			   size_t transcript_len,
+			   const void *cert_chain,
+			   size_t cert_chain_len,
 			   enum hash_algo base_hash_alg,
 			   size_t sig_len,
 			   int rsp_code, u8 slot,
@@ -27,13 +29,17 @@ int spdm_netlink_sig_event(struct device *dev,
 #else
 static inline int spdm_netlink_sig_event(struct device *dev,
 			   u8 version,
-			   void *transcript,
+			   const void *transcript,
 			   size_t transcript_len,
+			   const void *cert_chain,
+			   size_t cert_chain_len,
 			   enum hash_algo base_hash_alg,
 			   size_t sig_len,
 			   int rsp_code, u8 slot,
 			   size_t req_nonce_off, size_t rsp_nonce_off,
 			   const char *spdm_context) { return 0; }
 #endif
+
+int spdm_chall(struct spdm_state *spdm_state);
 
 #endif /* _LIB_SPDM_H_ */

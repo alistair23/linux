@@ -26,3 +26,12 @@ pub extern "C" fn rust_authenticated_show(spdm_state: *mut SpdmState, buf: *mut 
     // SAFETY: Calling a kernel C function with valid arguments
     unsafe { bindings::sysfs_emit(buf, fmt.as_char_ptr()) as isize }
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn spdm_chall(state: &'static mut SpdmState) -> c_int {
+    if let Err(e) = state.challenge(state.provisioned_slots.trailing_zeros() as u8, false) {
+        return e.to_errno() as c_int;
+    }
+
+    0
+}

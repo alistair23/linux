@@ -46,8 +46,10 @@ static void spdm_create_combined_prefix(u8 version, const char *spdm_context,
 
 int spdm_netlink_sig_event(struct device *dev,
 			   u8 version,
-			   void *transcript,
+			   const void *transcript,
 			   size_t transcript_len,
+			   const void *cert_chain,
+			   size_t cert_chain_len,
 			   enum hash_algo base_hash_alg,
 			   size_t sig_len,
 			   int rsp_code, u8 slot,
@@ -57,7 +59,8 @@ int spdm_netlink_sig_event(struct device *dev,
 	unsigned int seq, msg_sz, nr_msgs, nr_pages, nr_frags;
 	struct sk_buff *msg;
 	struct nlattr *nla;
-	void *hdr, *ptr;
+	void *hdr;
+	const void *ptr;
 	int rc, i;
 
 	if (!genl_has_listeners(&spdm_nl_family, &init_net, SPDM_NLGRP_SIG))
@@ -81,6 +84,7 @@ int spdm_netlink_sig_event(struct device *dev,
 			nla_total_size(sizeof(u32)) +
 			nla_total_size(sizeof(u32)) +
 			nla_total_size(SPDM_COMBINED_PREFIX_SZ) +
+			nla_total_size(cert_chain_len) +
 			nla_total_size(0)));
 
 	msg = genlmsg_new(msg_sz, GFP_KERNEL);
@@ -119,6 +123,9 @@ int spdm_netlink_sig_event(struct device *dev,
 					    nla_data(nla));
 	}
 
+	if (cert_chain_len >= 0)
+		nla_put(msg, SPDM_A_SIG_CERTIFICATE_CHAIN, cert_chain_len, cert_chain);
+
 	ptr = transcript;
 
 	/* Loop over Netlink messages - break condition is in loop body */
@@ -139,7 +146,6 @@ int spdm_netlink_sig_event(struct device *dev,
 			struct page *page = vmalloc_to_page(ptr);
 			size_t sz = min(remainder, PAGE_SIZE);
 
-			get_page(page);
 			skb_add_rx_frag(msg, i, page, 0, sz, sz);
 			ptr += PAGE_SIZE;
 			transcript_len -= PAGE_SIZE;

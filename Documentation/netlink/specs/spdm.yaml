@@ -112,6 +112,9 @@ attribute-sets:
         checks:
           exact-len: 100
       -
+        name: certificate-chain
+        type: binary
+      -
         name: transcript
         type: binary
         multi-attr: true

@@ -606,6 +606,7 @@ config LWQ_TEST
 
 config RSPDM
 	bool "Rust SPDM"
+	select RUST
 	select CRYPTO
 	select KEYS
 	select ASYMMETRIC_KEY_TYPE

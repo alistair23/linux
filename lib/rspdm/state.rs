@@ -13,6 +13,7 @@ use kernel::prelude::*;
 use kernel::{
     bindings,
     error::{code::EINVAL, from_err_ptr, to_result, Error},
+    page::PAGE_SIZE,
     str::CStr,
     str::CString,
     validate::Untrusted,
@@ -120,11 +121,10 @@ pub struct SpdmState {
     pub(crate) authenticated: bool,
 
     // Certificates
-    pub(crate) slot: [Option<KVec<u8>>; SPDM_SLOTS],
-    slot_sz: [usize; SPDM_SLOTS],
+    pub(crate) certs: [KVec<u8>; SPDM_SLOTS],
     pub(crate) leaf_key: Option<*mut bindings::public_key>,
 
-    transcript: KVec<u8>,
+    transcript: VVec<u8>,
 
     next_nonce: Option<&'static mut [u8]>,
 }
@@ -167,10 +167,9 @@ impl SpdmState {
             desc: None,
             hash_len: 0,
             authenticated: false,
-            slot: [const { None }; SPDM_SLOTS],
-            slot_sz: [0; SPDM_SLOTS],
+            certs: [const { KVec::new() }; SPDM_SLOTS],
             leaf_key: None,
-            transcript: KVec::new(),
+            transcript: VVec::new(),
             next_nonce: None,
         }
     }
@@ -499,9 +498,7 @@ impl SpdmState {
          */
         self.shash =
             unsafe { bindings::crypto_alloc_shash(self.base_hash_alg_name.as_char_ptr(), 0, 0) };
-        if self.shash.is_null() {
-            return Err(ENOMEM);
-        }
+        from_err_ptr(self.shash)?;
 
         let desc_len = core::mem::size_of::<bindings::shash_desc>()
             + unsafe { bindings::crypto_shash_descsize(self.shash) } as usize;
@@ -570,7 +567,7 @@ impl SpdmState {
             Untrusted::new_mut(&mut response_vec).validate_mut()?;
 
         self.transcript
-            .extend_from_slice(&response_vec[..rsp_sz], GFP_KERNEL)?;
+            .extend_from_slice(&response_vec, GFP_KERNEL)?;
 
         self.base_asym_alg = response.base_asym_sel;
         self.base_hash_alg = response.base_hash_sel;
@@ -648,8 +645,7 @@ impl SpdmState {
         let mut deprovisioned_slots = self.provisioned_slots & !response.param2;
         while (deprovisioned_slots.trailing_zeros() as usize) < SPDM_SLOTS {
             let slot = deprovisioned_slots.trailing_zeros() as usize;
-            self.slot[slot] = None;
-            self.slot_sz[slot] = 0;
+            self.certs[slot].clear();
             deprovisioned_slots &= !(1 << slot);
         }
 
@@ -722,13 +718,13 @@ impl SpdmState {
         let rsp_sz = ((core::mem::size_of::<GetCertificateRsp>() + 0xffff) as u32)
             .min(self.transport_sz) as usize;
 
+        request.offset = 0;
+        request.length = (rsp_sz - core::mem::size_of::<GetCertificateRsp>()).to_le() as u16;
+
         // SAFETY: `request` is repr(C) and packed, so we can convert it to a slice
         let request_buf = unsafe { from_raw_parts_mut(&mut request as *mut _ as *mut u8, req_sz) };
 
         let mut response_vec: KVec<u8> = KVec::with_capacity(rsp_sz, GFP_KERNEL)?;
-
-        request.offset = 0;
-        request.length = (rsp_sz - core::mem::size_of::<GetCertificateRsp>()).to_le() as u16;
 
         let response = self.get_cert_exchange(request_buf, &mut response_vec, rsp_sz)?;
 
@@ -750,6 +746,9 @@ impl SpdmState {
             request.length = (remainder_length
                 .min(rsp_sz - core::mem::size_of::<GetCertificateRsp>()))
             .to_le() as u16;
+
+            let request_buf =
+                unsafe { from_raw_parts_mut(&mut request as *mut _ as *mut u8, req_sz) };
 
             let response = self.get_cert_exchange(request_buf, &mut response_vec, rsp_sz)?;
 
@@ -786,15 +785,15 @@ impl SpdmState {
             to_result(-(bindings::EPROTO as i32))?;
         }
 
-        self.slot_sz[slot as usize] = total_cert_len;
-        self.slot[slot as usize] = Some(certs_buf);
+        self.certs[slot as usize].clear();
+        self.certs[slot as usize].extend_from_slice(&certs_buf, GFP_KERNEL);
 
         Ok(())
     }
 
     pub(crate) fn validate_cert_chain(&mut self, slot: u8) -> Result<(), Error> {
-        let cert_chain_buf = self.slot[slot as usize].as_ref().ok_or(ENOMEM)?;
-        let cert_chain_len = self.slot_sz[slot as usize];
+        let cert_chain_buf = &self.certs[slot as usize];
+        let cert_chain_len = cert_chain_buf.len();
         let header_len = 4 + self.hash_len;
 
         let mut offset = header_len;
@@ -1038,7 +1037,7 @@ impl SpdmState {
             };
         }
 
-        let spdm_context = b"responder-challenge_auth signing";
+        let spdm_context = b"responder-challenge_auth signing\0";
 
         let hash_digest_size = if self.base_hash_alg < bindings::hash_algo_HASH_ALGO__LAST {
             // SAFETY: `base_hash_alg` is a valid offset into `hash_digest_size`
@@ -1052,12 +1051,33 @@ impl SpdmState {
         let rsp_nonce_off =
             self.transcript.len() + core::mem::size_of::<ChallengeRsp>() + hash_digest_size;
 
+        // This is the actual transcript length
+        let transcript_len = self.transcript.len();
+
+        // This is how much extra capacity we need to page align the transcript buffer
+        let extra_cap = PAGE_SIZE - transcript_len.rem_euclid(PAGE_SIZE);
+        // Ensure we have the capacity
+        self.transcript.reserve(extra_cap, GFP_KERNEL)?;
+
+        // We know the buffer is this long and this value will be PAGE_SIZE aligned
+        let transcript_buf_len = transcript_len + extra_cap;
+
+        let cert_chain_len = self.certs[slot as usize].len();
+
+        let cert_chain = if cert_chain_len > 0 {
+            self.certs[slot as usize].as_ptr() as *const c_void
+        } else {
+            core::ptr::null_mut()
+        };
+
         unsafe {
             bindings::spdm_netlink_sig_event(
                 self.dev,
                 self.version,
-                &mut self.transcript as *mut _ as *mut c_void,
-                self.transcript.len(),
+                self.transcript.as_ptr() as *const c_void,
+                transcript_buf_len,
+                cert_chain,
+                cert_chain_len,
                 self.base_hash_alg,
                 self.sig_len,
                 0x03,
