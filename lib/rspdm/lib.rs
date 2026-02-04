@@ -29,6 +29,7 @@ const __LOG_PREFIX: &[u8] = b"spdm\0";
 
 mod consts;
 mod state;
+pub mod sysfs;
 mod validator;
 
 /// spdm_create() - Allocate SPDM session

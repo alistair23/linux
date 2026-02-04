@@ -692,12 +692,15 @@ Description:
 		authentication (PCIe CMA-SPDM) and link encryption (PCIe IDE)
 		are handled by the platform TSM (TEE Security Manager). When the
 		tsm/ directory is not present this attribute reflects only the
-		native CMA-SPDM authentication state with the kernel's
-		certificate store.
+		native CMA-SPDM authentication state.
 
 		If the attribute is not present, it indicates that
 		authentication is unsupported by the device, or the TSM has no
 		available authentication methods for the device.
+
+		If using CMA-SPDM, writing "re" to this file causes
+		reauthentication. That may be opportune after updating
+		the device keyring for example.
 
 		When present and the tsm/ attribute directory is present, the
 		authenticated attribute is an alias for the device 'connect'
