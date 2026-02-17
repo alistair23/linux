@@ -168,6 +168,9 @@ ssize_t tls_sw_splice_read(struct socket *sock, loff_t *ppos,
 			   size_t len, unsigned int flags);
 int tls_sw_read_sock(struct sock *sk, read_descriptor_t *desc,
 		     sk_read_actor_t read_actor);
+int tls_sw_read_sock_cmsg(struct sock *sk, read_descriptor_t *desc,
+			   sk_read_actor_t read_actor,
+			   sk_read_cmsg_actor_t cmsg_actor);
 
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 void tls_device_splice_eof(struct socket *sock);
