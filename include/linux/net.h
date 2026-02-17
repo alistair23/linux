@@ -154,6 +154,10 @@ struct sk_buff;
 struct proto_accept_arg;
 typedef int (*sk_read_actor_t)(read_descriptor_t *, struct sk_buff *,
 			       unsigned int, size_t);
+typedef int (*sk_read_cmsg_actor_t)(read_descriptor_t *,
+				    struct sk_buff *,
+				    unsigned int, size_t,
+				    u8 content_type);
 typedef int (*skb_read_actor_t)(struct sock *, struct sk_buff *);
 
 
@@ -218,6 +222,10 @@ struct proto_ops {
 	 */
 	int		(*read_sock)(struct sock *sk, read_descriptor_t *desc,
 				     sk_read_actor_t recv_actor);
+	int		(*read_sock_cmsg)(struct sock *sk,
+					  read_descriptor_t *desc,
+					  sk_read_actor_t recv_actor,
+					  sk_read_cmsg_actor_t cmsg_actor);
 	/* This is different from read_sock(), it reads an entire skb at a time. */
 	int		(*read_skb)(struct sock *sk, skb_read_actor_t recv_actor);
 	int		(*sendmsg_locked)(struct sock *sk, struct msghdr *msg,
