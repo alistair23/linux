@@ -705,3 +705,34 @@ Description:
 		When present and the tsm/ attribute directory is present, the
 		authenticated attribute is an alias for the device 'connect'
 		state. See the 'tsm/connect' attribute for more details.
+
+What:		/sys/bus/pci/devices/.../nonce
+Contact:	linux-pci@vger.kernel.org
+Description:
+		Userspace can write 32 bytes which the kernel will use
+		as the SPDM nonce on the next CHALLENGE request. If no
+		nonce is set the kernel will generate a random nonce.
+
+		Typically the nonce would be supplied by an external
+		verifier. The to be used nonce can be read back from
+		the file before it is used. The kernel will use the
+		nonce once when the next CHALLENGE request occurs,
+		at which point it will be cleared and the file will
+		appear empty.
+
+		$ dd if=/dev/random bs=32 count=1 | \
+			tee /sys/devices/pci0000:00/0000:00:03.0/nonce | hexdump
+		1+0 records in
+		1+0 records out
+		0000000 d4c2 ab41 8e95 c1be 46f7 ed81 9b8b 7c0a
+		0000010 7044 48dd 7bbf add1 db1a a94e b337 5716
+		0000020
+
+		$ cat /sys/devices/pci0000:00/0000:00:03.0/nonce | hexdump
+		0000000 d4c2 ab41 8e95 c1be 46f7 ed81 9b8b 7c0a
+		0000010 7044 48dd 7bbf add1 db1a a94e b337 5716
+		0000020
+
+		$ echo re > /sys/devices/pci0000:00/0000:00:03.0/authenticated
+
+		$ cat /sys/devices/pci0000:00/0000:00:03.0/nonce | hexdump

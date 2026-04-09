@@ -14,6 +14,8 @@
 #include "spdm.h"
 
 int rust_authenticated_show(void *spdm_state, char *buf);
+ssize_t rust_nonce_store(void *spdm_state, const char *buf, loff_t off, size_t count);
+ssize_t rust_nonce_show(void *spdm_state, char *buf, loff_t off, size_t count);
 
 /**
  * dev_to_spdm_state() - Retrieve SPDM session state for given device
@@ -52,6 +54,18 @@ static umode_t spdm_attrs_are_visible(struct kobject *kobj,
 	return a->mode;
 }
 
+static umode_t spdm_bin_attrs_are_visible(struct kobject *kobj,
+					  const struct bin_attribute *a, int n)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct spdm_state *spdm_state = dev_to_spdm_state(dev);
+
+	if (IS_ERR_OR_NULL(spdm_state))
+		return SYSFS_GROUP_INVISIBLE;
+
+	return a->attr.mode;
+}
+
 /* authenticated attribute */
 
 static ssize_t authenticated_store(struct device *dev,
@@ -87,12 +101,48 @@ static ssize_t authenticated_show(struct device *dev,
 }
 static DEVICE_ATTR_RW(authenticated);
 
+/* nonce attribute */
+
+static ssize_t nonce_write(struct file *filp, struct kobject *kobj,
+			   const struct bin_attribute *attr,
+			   char *buf, loff_t off, size_t count)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	void *spdm_state = dev_to_spdm_state(dev);
+
+	if (IS_ERR_OR_NULL(spdm_state))
+		return PTR_ERR(spdm_state);
+
+	return rust_nonce_store(spdm_state, buf, off, count);
+}
+
+static ssize_t nonce_read(struct file *filp, struct kobject *kobj,
+			  const struct bin_attribute *attr,
+			  char *buf, loff_t off, size_t count)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	void *spdm_state = dev_to_spdm_state(dev);
+
+	if (IS_ERR_OR_NULL(spdm_state))
+		return PTR_ERR(spdm_state);
+
+	return rust_nonce_show(spdm_state, buf, off, count);
+}
+static BIN_ATTR_RW(nonce, 32);
+
 static struct attribute *spdm_attrs[] = {
 	&dev_attr_authenticated.attr,
 	NULL
 };
 
+static const struct bin_attribute *spdm_bin_attrs[] = {
+	&bin_attr_nonce,
+	NULL
+};
+
 const struct attribute_group spdm_attr_group = {
 	.attrs = spdm_attrs,
+	.bin_attrs = spdm_bin_attrs,
 	.is_visible = spdm_attrs_are_visible,
+	.is_bin_visible = spdm_bin_attrs_are_visible,
 };

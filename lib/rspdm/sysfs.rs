@@ -8,6 +8,7 @@
 //! <https://www.dmtf.org/dsp/DSP0274>
 
 use crate::SpdmState;
+use core::slice::from_raw_parts;
 use kernel::prelude::*;
 use kernel::{bindings, str::CString};
 
@@ -35,4 +36,57 @@ pub unsafe extern "C" fn spdm_chall(state: &'static mut SpdmState) -> c_int {
     }
 
     0
+}
+
+/// Helper function for the sysfs `nonce_store()`.
+#[no_mangle]
+pub extern "C" fn rust_nonce_store(
+    spdm_state: *mut SpdmState,
+    buf: *const u8,
+    off: i64,
+    count: usize,
+) -> isize {
+    // SAFETY: The opaque pointer will be directly from the `spdm_create()`
+    // function, so we can safely dereference it.
+    let state = unsafe { &mut *spdm_state };
+    // SAFETY: `buf` is count bytes, initialised, aligned and won't be mutated
+    let slice = unsafe { from_raw_parts(buf, count) };
+    let capacity = state.next_nonce.capacity();
+    let end = off as usize + count;
+
+    if end > capacity {
+        if let Err(_) = state.next_nonce.extend_with(end - capacity, 0, GFP_KERNEL) {
+            return -(bindings::ENOMEM as isize);
+        }
+    }
+
+    state.next_nonce.as_mut_slice()[(off as usize)..end].copy_from_slice(slice);
+
+    count as isize
+}
+
+/// Helper function for the sysfs `nonce_show()`.
+#[no_mangle]
+pub extern "C" fn rust_nonce_show(
+    spdm_state: *mut SpdmState,
+    buf: *mut u8,
+    off: i64,
+    count: usize,
+) -> isize {
+    // SAFETY: The opaque pointer will be directly from the `spdm_create()`
+    // function, so we can safely dereference it.
+    let state = unsafe { &*spdm_state };
+    let nonce = state.next_nonce.as_slice();
+
+    if off as usize >= nonce.len() {
+        return 0;
+    }
+
+    let remaining = &nonce[off as usize..];
+    let len = core::cmp::min(remaining.len(), count);
+
+    // SAFETY: buf is at least count bytes, remaining is at least len bytes
+    unsafe { core::ptr::copy_nonoverlapping(remaining.as_ptr(), buf, len) };
+
+    len as isize
 }
