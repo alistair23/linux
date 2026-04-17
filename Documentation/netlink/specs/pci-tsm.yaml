@@ -1,0 +1,151 @@
+# SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
+#
+---
+name: pci-tsm
+protocol: genetlink
+uapi-header: linux/pci-tsm-netlink.h
+doc: PCI TSM Evidence retrieval over generic netlink
+
+definitions:
+  -
+    type: const
+    name: max-object-size
+    value: 0x01000000
+  -
+    type: const
+    name: max-nonce-size
+    value: 256
+  -
+    type: const
+    name: max-obj-type
+    value: 4
+  -
+    name: evidence-type
+    type: enum
+    doc: PCI device security evidence objects
+    entries:
+      -
+        name: cert0
+        doc: SPDM certificate chain from device slot0
+      -
+        name: cert1
+        doc: SPDM certificate chain from device slot1
+      -
+        name: cert2
+        doc: SPDM certificate chain from device slot2
+      -
+        name: cert3
+        doc: SPDM certificate chain from device slot3
+      -
+        name: cert4
+        doc: SPDM certificate chain from device slot4
+      -
+        name: cert5
+        doc: SPDM certificate chain from device slot5
+      -
+        name: cert6
+        doc: SPDM certificate chain from device slot6
+      -
+        name: cert7
+        doc: SPDM certificate chain from device slot7
+      -
+        name: vca
+        doc: SPDM transcript of version, capabilities, and algorithms negotiation
+      -
+        name: measurements
+        doc: SPDM GET_MEASUREMENTS response
+      -
+        name: report
+        doc: TDISP GET_DEVICE_INTERFACE_REPORT response
+
+    render-max: true
+  -
+    name: evidence-type-flag
+    type: flags
+    doc: PCI device security evidence request flags
+    render-max: true
+    # NOTE! these values must match the name and order of evidence-type
+    entries:
+      -
+        name: cert0
+      -
+        name: cert1
+      -
+        name: cert2
+      -
+        name: cert3
+      -
+        name: cert4
+      -
+        name: cert5
+      -
+        name: cert6
+      -
+        name: cert7
+      -
+        name: vca
+      -
+        name: measurements
+      -
+        name: report
+  -
+    name: evidence-flag
+    type: flags
+    render-max: true
+    doc: Flags to control evidence retrieval
+    entries:
+      -
+        name: digest
+        doc: Request the TSM's private digest of an evidence object
+
+attribute-sets:
+  -
+    name: evidence-object
+    attributes:
+      -
+        name: type
+        type: u32
+        doc: evidence type-id
+      -
+        name: type-mask
+        type: u32
+        doc: evidence types as a flag mask
+      -
+        name: flags
+        type: u32
+        doc: evidence modifier flags like 'request TSM digest'
+      -
+        name: dev-name
+        type: string
+        doc: PCI device name
+      -
+        name: nonce
+        type: binary
+        checks:
+          max-len: max-nonce-size
+      -
+        name: val
+        type: binary
+        checks:
+          max-len: max-obj-size
+
+operations:
+  list:
+    -
+      name: evidence-read
+      doc: Read the PCI TSM objects of a given type mask
+      attribute-set: evidence-object
+      flags: [admin-perm]
+      dump:
+        pre: pci-tsm-nl-evidence-read-pre
+        post: pci-tsm-nl-evidence-read-post
+        request:
+          attributes:
+            - type-mask
+            - flags
+            - dev-name
+            - nonce
+        reply:
+          attributes:
+            - type
+            - val

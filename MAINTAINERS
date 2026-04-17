@@ -27161,9 +27161,11 @@ S:	Maintained
 F:	Documentation/ABI/testing/configfs-tsm-report
 F:	Documentation/driver-api/coco/
 F:	Documentation/driver-api/pci/tsm.rst
-F:	drivers/pci/tsm.c
+F:	Documentation/netlink/specs/pci-tsm.yaml
+F:	drivers/pci/tsm/
 F:	drivers/virt/coco/guest/
 F:	include/linux/*tsm*.h
+F:	include/uapi/linux/pci-tsm-netlink.h
 F:	samples/tsm-mr/
 
 TRUSTED SERVICES TEE DRIVER
