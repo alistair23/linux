@@ -718,6 +718,11 @@ static ssize_t uevent_store(struct device_driver *drv, const char *buf,
 }
 static DRIVER_ATTR_WO(uevent);
 
+bool driver_autoprobe(struct device_driver *drv)
+{
+	return module_requested_autoprobe(drv->owner);
+}
+
 /**
  * bus_add_driver - Add a driver to the bus.
  * @drv: driver.
@@ -752,7 +757,7 @@ int bus_add_driver(struct device_driver *drv)
 		goto out_unregister;
 
 	klist_add_tail(&priv->knode_bus, &sp->klist_drivers);
-	if (sp->drivers_autoprobe) {
+	if (sp->drivers_autoprobe && driver_autoprobe(drv)) {
 		error = driver_attach(drv);
 		if (error)
 			goto out_del_list;

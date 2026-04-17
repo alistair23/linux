@@ -987,6 +987,12 @@ struct device_attach_data {
 	 * driver, we'll encounter one that requests asynchronous probing.
 	 */
 	bool have_async;
+
+	/*
+	 * On initial device arrival driver attach is subject to
+	 * driver_autoprobe() policy.
+	 */
+	bool initial_probe;
 };
 
 static int __device_attach_driver(struct device_driver *drv, void *_data)
@@ -995,6 +1001,13 @@ static int __device_attach_driver(struct device_driver *drv, void *_data)
 	struct device *dev = data->dev;
 	bool async_allowed;
 	int ret;
+
+	/*
+	 * At initial probe of a newly arrived device, honor the policy to defer
+	 * attachment to explicit userspace bind request.
+	 */
+	if (data->initial_probe && !driver_autoprobe(drv))
+		return 0;
 
 	ret = driver_match_device(drv, dev);
 	if (ret == 0) {
@@ -1068,8 +1081,13 @@ out_unlock:
 	put_device(dev);
 }
 
-static int __device_attach(struct device *dev, bool allow_async)
+#define DEVICE_ATTACH_F_ASYNC BIT(0)
+#define DEVICE_ATTACH_F_INITIAL BIT(1)
+
+static int __device_attach(struct device *dev, unsigned long flags)
 {
+	bool allow_async = flags & DEVICE_ATTACH_F_ASYNC;
+	bool initial_probe = flags & DEVICE_ATTACH_F_INITIAL;
 	int ret = 0;
 	bool async = false;
 
@@ -1093,6 +1111,7 @@ static int __device_attach(struct device *dev, bool allow_async)
 			.dev = dev,
 			.check_async = allow_async,
 			.want_async = false,
+			.initial_probe = initial_probe,
 		};
 
 		if (dev->parent)
@@ -1141,7 +1160,7 @@ out_unlock:
  */
 int device_attach(struct device *dev)
 {
-	return __device_attach(dev, false);
+	return __device_attach(dev, 0);
 }
 EXPORT_SYMBOL_GPL(device_attach);
 
@@ -1153,7 +1172,8 @@ void device_initial_probe(struct device *dev)
 		return;
 
 	if (sp->drivers_autoprobe)
-		__device_attach(dev, true);
+		__device_attach(dev, DEVICE_ATTACH_F_INITIAL |
+					     DEVICE_ATTACH_F_ASYNC);
 
 	subsys_put(sp);
 }

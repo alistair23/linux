@@ -443,6 +443,7 @@ struct module {
 #endif
 
 	bool async_probe_requested;
+	bool autoprobe;
 
 	/* Exception table */
 	unsigned int num_exentries;
@@ -763,6 +764,14 @@ static inline bool module_requested_async_probing(struct module *module)
 	return module && module->async_probe_requested;
 }
 
+static inline bool module_requested_autoprobe(struct module *module)
+{
+	/* Built-in modules autoprobe by default. */
+	if (!module)
+		return true;
+	return module->autoprobe;
+}
+
 static inline bool is_livepatch_module(struct module *mod)
 {
 #ifdef CONFIG_LIVEPATCH
@@ -865,6 +874,11 @@ static inline bool module_requested_async_probing(struct module *module)
 	return false;
 }
 
+static inline bool module_requested_autoprobe(struct module *module)
+{
+	/* Built-in modules autoprobe by default. */
+	return true;
+}
 
 /* Dereference module function descriptor */
 static inline

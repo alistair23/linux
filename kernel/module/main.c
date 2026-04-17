@@ -3068,6 +3068,10 @@ void flush_module_init_free_work(void)
 static bool async_probe;
 module_param(async_probe, bool, 0644);
 
+/* Default value for module->autoprobe */
+bool modules_autoprobe = IS_ENABLED(CONFIG_MODULES_AUTOPROBE);
+module_param(modules_autoprobe, bool, 0644);
+
 /*
  * This is where the real work happens.
  *
@@ -3375,6 +3379,14 @@ static int unknown_module_param_cb(char *param, char *val, const char *modname,
 		return 0;
 	}
 
+	if (strcmp(param, "autoprobe") == 0) {
+		bool autoprobe;
+
+		if (kstrtobool(val, &autoprobe) >= 0)
+			mod->autoprobe = autoprobe;
+		return 0;
+	}
+
 	/* Check for magic 'dyndbg' arg */
 	ret = ddebug_dyndbg_module_param_cb(param, val, modname);
 	if (ret != 0)
@@ -3544,6 +3556,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
 		goto bug_cleanup;
 
 	mod->async_probe_requested = async_probe;
+	mod->autoprobe = modules_autoprobe;
 
 	/* Module is ready to execute: parsing args may do that. */
 	after_dashes = parse_args(mod->name, mod->args, mod->kp, mod->num_kp,

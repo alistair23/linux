@@ -252,6 +252,7 @@ void device_block_probing(void);
 void device_unblock_probing(void);
 void deferred_probe_extend_timeout(void);
 void driver_deferred_probe_trigger(void);
+bool driver_autoprobe(struct device_driver *drv);
 const char *device_get_devnode(const struct device *dev, umode_t *mode,
 			       kuid_t *uid, kgid_t *gid, const char **tmp);
 

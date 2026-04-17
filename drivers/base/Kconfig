@@ -262,4 +262,28 @@ config CONFIDENTIAL_DEVICES
 	depends on ARCH_HAS_CC_PLATFORM
 	bool
 
+config MODULES_AUTOPROBE
+	bool "Automatic probe of drivers from modules"
+	default y
+	help
+	  Say Y for the typical and traditional Linux behavior of automatically
+	  attaching devices to drivers when a module is loaded.
+
+	  Say N to opt into a threat model where userspace verification of a
+	  device is required before driver attach. This includes Confidential
+	  Computing use cases where the device needs to have its configuration
+	  locked and verified by a relying party. It also includes use cases
+	  like leaving devices with Address Translation (IOMMU protection
+	  bypass) capability disabled until userspace attests the device and
+	  binds a driver.
+
+	  This default value can be overridden by the "autoprobe" module option.
+	  Note that some subsystems may not be prepared for autoprobe to be
+	  disabled, take care to test your selected drivers.  Built-in drivers are
+	  unaffected by this policy and will autoprobe unless the bus itself has
+	  disabled autoprobe.
+
+	  If in doubt, say Y. The N case is only for expert configurations, and
+	  selective "autoprobe=0" in modprobe policy is the common expectation.
+
 endmenu
