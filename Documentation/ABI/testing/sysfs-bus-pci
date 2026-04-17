@@ -647,13 +647,16 @@ Description:
 		Encryption) establishment. Reads from this attribute return the
 		name of the connected TSM or the empty string if not
 		connected. A TSM device signals its readiness to accept PCI
-		connection via a KOBJ_CHANGE event.
+		connection via a KOBJ_CHANGE event. This is a "link" TSM
+		attribute, see Documentation/ABI/testing/sysfs-class-tsm.
 
 What:		/sys/bus/pci/devices/.../tsm/disconnect
 Contact:	linux-coco@lists.linux.dev
 Description:
 		(WO) Write the name of the TSM device that was specified
-		to 'connect' to teardown the connection.
+		to 'connect' to teardown the connection. This is a
+		"link" TSM attribute, see
+		Documentation/ABI/testing/sysfs-class-tsm.
 
 What:		/sys/bus/pci/devices/.../tsm/dsm
 Contact:	linux-coco@lists.linux.dev
@@ -705,34 +708,43 @@ Description:
 		When present and the tsm/ attribute directory is present, the
 		authenticated attribute is an alias for the device 'connect'
 		state. See the 'tsm/connect' attribute for more details.
+		This is a "link" TSM attribute, see
+		Documentation/ABI/testing/sysfs-class-tsm.
 
-What:		/sys/bus/pci/devices/.../nonce
-Contact:	linux-pci@vger.kernel.org
+What:		/sys/bus/pci/devices/.../tsm/lock
+Contact:	linux-coco@lists.linux.dev
 Description:
-		Userspace can write 32 bytes which the kernel will use
-		as the SPDM nonce on the next CHALLENGE request. If no
-		nonce is set the kernel will generate a random nonce.
+		(RW) Write the name of a TSM (TEE Security Manager) device
+		instance to this file to request that the platform transition
+		the PCIe device configuration to the TDISP LOCKED state. This
+		puts the device in a state where security sensitive
+		configuration setting can not be changed without transitioning
+		the device the PCIe TDISP ERROR state. Reads from this attribute
+		return the name of the TSM device instance that has arranged for
+		the device to be locked, or the empty string if not locked. A
+		TSM class device signals its readiness for lock requests via a
+		KOBJ_CHANGE event. Writes fail with EBUSY if this device is
+		bound to a driver. This is a "devsec" TSM attribute, see
+		Documentation/ABI/testing/sysfs-class-tsm. See
+		Documentation/driver-api/pci/tsm.rst for more details.
 
-		Typically the nonce would be supplied by an external
-		verifier. The to be used nonce can be read back from
-		the file before it is used. The kernel will use the
-		nonce once when the next CHALLENGE request occurs,
-		at which point it will be cleared and the file will
-		appear empty.
+What:		/sys/bus/pci/devices/.../tsm/unlock
+Contact:	linux-coco@lists.linux.dev
+Description:
+		(WO) Write the name of the TSM device that was specified to
+		'lock' to teardown the connection. Writes fail with EBUSY if
+		this device is bound to a driver. This is a "devsec" TSM
+		attribute, see Documentation/ABI/testing/sysfs-class-tsm.
 
-		$ dd if=/dev/random bs=32 count=1 | \
-			tee /sys/devices/pci0000:00/0000:00:03.0/nonce | hexdump
-		1+0 records in
-		1+0 records out
-		0000000 d4c2 ab41 8e95 c1be 46f7 ed81 9b8b 7c0a
-		0000010 7044 48dd 7bbf add1 db1a a94e b337 5716
-		0000020
-
-		$ cat /sys/devices/pci0000:00/0000:00:03.0/nonce | hexdump
-		0000000 d4c2 ab41 8e95 c1be 46f7 ed81 9b8b 7c0a
-		0000010 7044 48dd 7bbf add1 db1a a94e b337 5716
-		0000020
-
-		$ echo re > /sys/devices/pci0000:00/0000:00:03.0/authenticated
-
-		$ cat /sys/devices/pci0000:00/0000:00:03.0/nonce | hexdump
+What:		/sys/bus/pci/devices/.../tsm/accept
+Contact:	linux-coco@lists.linux.dev
+Description:
+		(RW) Write "1" (or any boolean "true" string) to this file to
+		request that TSM transition the device from the TDISP LOCKED
+		state to the RUN state and arrange the for the secure IOMMU to
+		accept requests with T=1 in the PCIe packet header (TLP)
+		targeting private memory. Per TDISP the only exits from the RUN
+		state are via an explicit unlock request or an event that
+		transitions the device to the ERROR state. Writes fail with
+		EBUSY if this device is bound to a driver. This is a "devsec"
+		TSM attribute, see Documentation/ABI/testing/sysfs-class-tsm.
