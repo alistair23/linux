@@ -131,6 +131,7 @@ config PCI_CMA
 	select CRYPTO_SHA256
 	select CRYPTO_SHA512
 	select PCI_DOE
+	select PCI_TSM
 	select RSPDM
 	help
 	  Authenticate devices on enumeration per PCIe r6.2 sec 6.31.

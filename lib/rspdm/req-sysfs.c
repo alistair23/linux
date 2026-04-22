@@ -14,8 +14,8 @@
 #include "spdm.h"
 
 int rust_authenticated_show(void *spdm_state, char *buf);
-ssize_t rust_nonce_store(void *spdm_state, const char *buf, loff_t off, size_t count);
-ssize_t rust_nonce_show(void *spdm_state, char *buf, loff_t off, size_t count);
+ssize_t spdm_nonce_store(void *spdm_state, const char *buf, loff_t off, size_t count);
+ssize_t spdm_nonce_show(void *spdm_state, char *buf, loff_t off, size_t count);
 
 /**
  * dev_to_spdm_state() - Retrieve SPDM session state for given device
@@ -113,7 +113,7 @@ static ssize_t nonce_write(struct file *filp, struct kobject *kobj,
 	if (IS_ERR_OR_NULL(spdm_state))
 		return PTR_ERR(spdm_state);
 
-	return rust_nonce_store(spdm_state, buf, off, count);
+	return spdm_nonce_store(spdm_state, buf, off, count);
 }
 
 static ssize_t nonce_read(struct file *filp, struct kobject *kobj,
@@ -126,7 +126,7 @@ static ssize_t nonce_read(struct file *filp, struct kobject *kobj,
 	if (IS_ERR_OR_NULL(spdm_state))
 		return PTR_ERR(spdm_state);
 
-	return rust_nonce_show(spdm_state, buf, off, count);
+	return spdm_nonce_show(spdm_state, buf, off, count);
 }
 static BIN_ATTR_RW(nonce, 32);
 

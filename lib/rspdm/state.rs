@@ -158,7 +158,7 @@ pub struct SpdmState {
     pub(crate) certs: [KVec<u8>; SPDM_SLOTS],
     pub(crate) leaf_key: Option<*mut bindings::public_key>,
 
-    transcript: VVec<u8>,
+    pub(crate) transcript: VVec<u8>,
 
     pub(crate) next_nonce: KVec<u8>,
 }

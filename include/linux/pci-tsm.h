@@ -255,9 +255,9 @@ static inline bool is_pci_tsm_pf0(struct pci_dev *pdev)
 	case PCI_EXP_TYPE_ENDPOINT:
 	case PCI_EXP_TYPE_UPSTREAM:
 	case PCI_EXP_TYPE_RC_END:
-		if (pdev->ide_cap || (pdev->devcap & PCI_EXP_DEVCAP_TEE))
+		// if (pdev->ide_cap || (pdev->devcap & PCI_EXP_DEVCAP_TEE))
 			break;
-		fallthrough;
+		// fallthrough;
 	default:
 		return false;
 	}

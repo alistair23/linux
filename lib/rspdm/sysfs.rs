@@ -40,7 +40,7 @@ pub unsafe extern "C" fn spdm_chall(state: &'static mut SpdmState) -> c_int {
 
 /// Helper function for the sysfs `nonce_store()`.
 #[no_mangle]
-pub extern "C" fn rust_nonce_store(
+pub extern "C" fn spdm_nonce_store(
     spdm_state: *mut SpdmState,
     buf: *const u8,
     off: i64,
@@ -67,7 +67,7 @@ pub extern "C" fn rust_nonce_store(
 
 /// Helper function for the sysfs `nonce_show()`.
 #[no_mangle]
-pub extern "C" fn rust_nonce_show(
+pub extern "C" fn spdm_nonce_show(
     spdm_state: *mut SpdmState,
     buf: *mut u8,
     off: i64,
@@ -89,4 +89,47 @@ pub extern "C" fn rust_nonce_show(
     unsafe { core::ptr::copy_nonoverlapping(remaining.as_ptr(), buf, len) };
 
     len as isize
+}
+
+/// Return a pointer and length for the certificate chain in the given slot.
+/// Returns 0 length if the slot has no certificate.
+#[no_mangle]
+pub extern "C" fn spdm_get_cert(
+    spdm_state: *const SpdmState,
+    slot: u8,
+    out_data: *mut *const u8,
+    out_len: *mut usize,
+) {
+    // SAFETY: The opaque pointer will be directly from the `spdm_create()`
+    // function, so we can safely dereference it.
+    let state = unsafe { &*spdm_state };
+    if slot as usize >= crate::consts::SPDM_SLOTS || state.certs[slot as usize].is_empty() {
+        unsafe {
+            *out_data = core::ptr::null();
+            *out_len = 0;
+        }
+    } else {
+        unsafe {
+            *out_data = state.certs[slot as usize].as_ptr();
+            *out_len = state.certs[slot as usize].len();
+        }
+    }
+}
+
+/// Return a pointer and length for the VCA (version/capabilities/algorithms) transcript.
+/// This is the portion of the SPDM transcript before the CHALLENGE exchange.
+#[no_mangle]
+pub extern "C" fn spdm_get_transcript(
+    spdm_state: *const SpdmState,
+    out_data: *mut *const u8,
+    out_len: *mut usize,
+) {
+    // SAFETY: The opaque pointer will be directly from the `spdm_create()`
+    // function, so we can safely dereference it.
+    let state = unsafe { &*spdm_state };
+    let len = state.transcript.len();
+    unsafe {
+        *out_data = state.transcript.as_ptr();
+        *out_len = len;
+    }
 }

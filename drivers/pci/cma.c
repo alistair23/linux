@@ -10,12 +10,16 @@
 
 #define dev_fmt(fmt) "CMA: " fmt
 
+#include <crypto/hash_info.h>
 #include <keys/x509-parser.h>
 #include <linux/asn1_decoder.h>
 #include <linux/oid_registry.h>
 #include <linux/pci.h>
 #include <linux/pci-doe.h>
+#include <linux/pci-tsm.h>
+#include <linux/slab.h>
 #include <linux/spdm.h>
+#include <linux/tsm.h>
 
 #include "cma.asn1.h"
 #include "pci.h"
@@ -150,52 +154,209 @@ static ssize_t pci_doe_transport(void *priv, struct device *dev,
 	return rc;
 }
 
-void pci_cma_init(struct pci_dev *pdev)
+/**
+ * struct pci_cma_tsm - CMA SPDM TSM driver context
+ * @pf0: base pci_tsm_pf0 context (must be first)
+ * @spdm: SPDM session for this device
+ */
+struct pci_cma_tsm {
+	struct pci_tsm_pf0 pf0;
+	struct spdm_state *spdm;
+};
+
+static struct pci_cma_tsm *cma_tsm_from_tsm(struct pci_tsm *tsm)
+{
+	struct pci_tsm_pf0 *pf0 = container_of(tsm, struct pci_tsm_pf0, base_tsm);
+
+	return container_of(pf0, struct pci_cma_tsm, pf0);
+}
+
+/**
+ * struct pci_cma_devsec - CMA SPDM devsec TSM context
+ * @devsec: base pci_tsm_devsec context (must be first)
+ * @spdm: SPDM session for this device
+ */
+struct pci_cma_devsec {
+	struct pci_tsm_devsec devsec;
+	struct spdm_state *spdm;
+};
+
+static struct pci_cma_devsec *cma_devsec_from_tsm(struct pci_tsm *tsm)
+{
+	struct pci_tsm_devsec *devsec =
+		container_of(tsm, struct pci_tsm_devsec, base_tsm);
+
+	return container_of(devsec, struct pci_cma_devsec, devsec);
+}
+
+static void cma_tsm_free_evidence_objects(struct pci_tsm_evidence *evidence)
+{
+	int i;
+
+	for (i = 0; i <= PCI_TSM_EVIDENCE_TYPE_MAX; i++) {
+		kfree(evidence->obj[i].data);
+		evidence->obj[i].data = NULL;
+		evidence->obj[i].len = 0;
+	}
+}
+
+static int cma_tsm_populate_evidence(struct spdm_state *spdm,
+				      struct pci_tsm_evidence *evidence)
+{
+	const u8 *data;
+	size_t len;
+	int slot, rc = 0;
+
+	down_write(&evidence->lock);
+	cma_tsm_free_evidence_objects(evidence);
+
+	for (slot = 0; slot < 8; slot++) {
+		spdm_get_cert(spdm, slot, &data, &len);
+		if (!data || !len)
+			continue;
+		evidence->obj[PCI_TSM_EVIDENCE_TYPE_CERT0 + slot].data =
+			kmemdup(data, len, GFP_KERNEL);
+		if (!evidence->obj[PCI_TSM_EVIDENCE_TYPE_CERT0 + slot].data) {
+			rc = -ENOMEM;
+			goto out_free;
+		}
+		evidence->obj[PCI_TSM_EVIDENCE_TYPE_CERT0 + slot].len = len;
+	}
+
+	spdm_get_transcript(spdm, &data, &len);
+	if (data && len) {
+		evidence->obj[PCI_TSM_EVIDENCE_TYPE_VCA].data =
+			kmemdup(data, len, GFP_KERNEL);
+		if (!evidence->obj[PCI_TSM_EVIDENCE_TYPE_VCA].data) {
+			rc = -ENOMEM;
+			goto out_free;
+		}
+		evidence->obj[PCI_TSM_EVIDENCE_TYPE_VCA].len = len;
+	}
+
+	evidence->generation++;
+	goto out_unlock;
+
+out_free:
+	cma_tsm_free_evidence_objects(evidence);
+out_unlock:
+	up_write(&evidence->lock);
+	return rc;
+}
+
+static struct pci_tsm *pci_cma_tsm_probe(struct tsm_dev *tsm_dev,
+				      struct pci_dev *pdev)
 {
 	struct pci_doe_mb *doe;
-
-	if (!pci_is_pcie(pdev))
-		return;
+	struct pci_cma_tsm *cma;
 
 	doe = pci_find_doe_mailbox(pdev, PCI_VENDOR_ID_PCI_SIG,
 				   PCI_DOE_FEATURE_CMA);
 	if (!doe)
-		return;
+		return NULL;
 
-	pdev->spdm_state = spdm_create(&pdev->dev, pci_doe_transport, doe,
-				       PCI_DOE_MAX_PAYLOAD,
-				       pci_cma_validate);
-	if (!pdev->spdm_state) {
-		pdev->spdm_state = ERR_PTR(-ENOTTY);
-		return;
+	cma = kzalloc(sizeof(*cma), GFP_KERNEL);
+	if (!cma)
+		return NULL;
+
+	mutex_init(&cma->pf0.lock);
+	cma->pf0.doe_mb = doe;
+	cma->pf0.base_tsm.pdev = pdev;
+	cma->pf0.base_tsm.dsm_dev = pdev;
+	cma->pf0.base_tsm.tsm_dev = tsm_dev;
+
+	cma->spdm = spdm_create(&pdev->dev, pci_doe_transport, doe,
+				PCI_DOE_MAX_PAYLOAD, pci_cma_validate);
+	if (!cma->spdm) {
+		mutex_destroy(&cma->pf0.lock);
+		kfree(cma);
+		return NULL;
 	}
 
+	pci_tsm_init_evidence(&cma->pf0.base_tsm.evidence, 0, HASH_ALGO_SHA256);
+
+	return &cma->pf0.base_tsm;
+}
+
+static void pci_cma_tsm_remove(struct pci_tsm *tsm)
+{
+	struct pci_cma_tsm *cma = cma_tsm_from_tsm(tsm);
+
+	down_write(&tsm->evidence.lock);
+	cma_tsm_free_evidence_objects(&tsm->evidence);
+	up_write(&tsm->evidence.lock);
+
+	spdm_destroy(cma->spdm);
+	mutex_destroy(&cma->pf0.lock);
+	kfree(cma);
+}
+
+static int pci_cma_tsm_connect(struct pci_dev *pdev)
+{
+	struct pci_cma_tsm *cma = cma_tsm_from_tsm(pdev->tsm);
+	int rc;
+
+	rc = spdm_authenticate(cma->spdm);
+	if (rc)
+		return rc;
+
+	return cma_tsm_populate_evidence(cma->spdm, &pdev->tsm->evidence);
+}
+
+static void pci_cma_tsm_disconnect(struct pci_dev *pdev)
+{
+	/* Evidence and SPDM state are freed in pci_cma_tsm_remove() */
+}
+
+static int pci_cma_tsm_refresh(struct pci_tsm *tsm,
+				enum pci_tsm_evidence_type type,
+				unsigned long flags, void *nonce,
+				size_t nonce_len)
+{
 	/*
-	 * Keep spdm_state allocated even if initial authentication fails
-	 * to allow for provisioning of certificates and reauthentication.
+	 * Distinguish link (dsm_dev == pdev, self-DSM) from devsec
+	 * (dsm_dev == NULL) contexts to retrieve the right spdm pointer.
 	 */
-	spdm_authenticate(pdev->spdm_state);
+	struct spdm_state *spdm = tsm->dsm_dev
+		? cma_tsm_from_tsm(tsm)->spdm
+		: cma_devsec_from_tsm(tsm)->spdm;
+	int rc;
+
+	if (nonce) {
+		rc = spdm_nonce_store(spdm, nonce, 0, nonce_len);
+		if (rc)
+			return rc;
+	}
+
+	rc = spdm_authenticate(spdm);
+	if (rc)
+		return rc;
+
+	return cma_tsm_populate_evidence(spdm, &tsm->evidence);
 }
 
-/**
- * pci_cma_reauthenticate() - Perform CMA-SPDM authentication again
- * @pdev: Device to reauthenticate
- *
- * Can be called by drivers after device identity has mutated,
- * e.g. after downloading firmware to an FPGA device.
- */
-void pci_cma_reauthenticate(struct pci_dev *pdev)
+static const struct pci_tsm_ops pci_cma_tsm_ops = {
+	.link_ops = {
+		.probe		= pci_cma_tsm_probe,
+		.remove		= pci_cma_tsm_remove,
+		.connect	= pci_cma_tsm_connect,
+		.disconnect	= pci_cma_tsm_disconnect,
+	},
+	.refresh_evidence	= pci_cma_tsm_refresh,
+};
+
+static struct tsm_dev *pci_cma_tsm_dev;
+
+static int __init pci_cma_tsm_init(void)
 {
-	if (IS_ERR_OR_NULL(pdev->spdm_state))
-		return;
+	struct tsm_dev *tsm_dev;
 
-	spdm_authenticate(pdev->spdm_state);
+	/* tsm_register() registers with pci_tsm_register() internally */
+	tsm_dev = tsm_register(NULL, (struct pci_tsm_ops *)&pci_cma_tsm_ops);
+	if (IS_ERR(tsm_dev))
+		return PTR_ERR(tsm_dev);
+
+	pci_cma_tsm_dev = tsm_dev;
+	return 0;
 }
-
-void pci_cma_destroy(struct pci_dev *pdev)
-{
-	if (IS_ERR_OR_NULL(pdev->spdm_state))
-		return;
-
-	spdm_destroy(pdev->spdm_state);
-}
+late_initcall(pci_cma_tsm_init);

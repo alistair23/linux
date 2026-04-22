@@ -34,6 +34,16 @@ int spdm_authenticate(struct spdm_state *spdm_state);
 
 void spdm_destroy(struct spdm_state *spdm_state);
 
+ssize_t spdm_nonce_store(void *spdm_state,
+			 const char *buf, loff_t off, size_t count);
+ssize_t spdm_nonce_show(void *spdm_state,
+			char *buf, loff_t off, size_t count);
+
+void spdm_get_cert(const struct spdm_state *spdm_state, u8 slot,
+		   const u8 **data, size_t *len);
+void spdm_get_transcript(const struct spdm_state *spdm_state,
+			 const u8 **data, size_t *len);
+
 extern const struct attribute_group spdm_attr_group;
 
 #endif
