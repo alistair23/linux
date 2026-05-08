@@ -88,8 +88,8 @@ static void pci_tsm_walk_fns(struct pci_dev *pdev,
 		if (!pf)
 			continue;
 
-		/* on entry function 0 has already run @cb */
-		if (i > 0)
+		/* the caller is responsible for running @cb on the host itself */
+		if (pf != pdev)
 			cb(pf, data);
 
 		/* walk virtual functions of each pf */
@@ -145,8 +145,8 @@ static void pci_tsm_walk_fns_reverse(struct pci_dev *pdev,
 			cb(vf, data);
 		}
 
-		/* on exit, caller will run @cb on function 0 */
-		if (i > 0)
+		/* the caller is responsible for running @cb on the host itself */
+		if (pf != pdev)
 			cb(pf, data);
 	}
 }
@@ -174,6 +174,9 @@ static int probe_fn(struct pci_dev *pdev, void *dsm)
 {
 	struct pci_dev *dsm_dev = dsm;
 	const struct pci_tsm_ops *ops = to_pci_tsm_ops(dsm_dev->tsm);
+
+	if (pdev->tsm)
+		return 0;
 
 	pdev->tsm = ops->probe(dsm_dev->tsm->tsm_dev, pdev);
 	pci_dbg(pdev, "setup TSM context: DSM: %s status: %s\n",
@@ -221,8 +224,13 @@ static int pci_tsm_connect(struct pci_dev *pdev, struct tsm_dev *tsm_dev)
 	 * is the ultimate arbiter of security state relative to a given
 	 * interface id, and if it says it can manage TDISP state of a function,
 	 * let it.
+	 *
+	 * Only a function in a valid DSM position (function0 or upstream
+	 * port) with TEE capability manages subordinate functions. A plain
+	 * CMA host manages only itself, leaving sibling functions available
+	 * to be connected independently.
 	 */
-	if (has_tee(pdev))
+	if (has_tee(pdev) && is_pci_tsm_dsm(pdev))
 		pci_tsm_walk_fns(pdev, probe_fn, pdev);
 	return 0;
 }
@@ -287,6 +295,19 @@ static DEVICE_ATTR_RW(connect);
 
 static int remove_fn(struct pci_dev *pdev, void *data)
 {
+	struct pci_dev *host = data;
+	struct pci_tsm_host *tsm_host;
+
+	/*
+	 * Only teardown the security context of functions that belong to the
+	 * DSM being disconnected, leaving any sibling DSM in the same slot
+	 * untouched.
+	 */
+	if (!pdev->tsm || pdev->tsm->dsm_dev != host)
+		return 0;
+
+	tsm_host = to_pci_tsm_host(pdev->tsm);
+	guard(mutex)(&tsm_host->lock);
 	tsm_remove(pdev->tsm);
 	link_sysfs_disable(pdev);
 	return 0;
@@ -299,12 +320,21 @@ static int remove_fn(struct pci_dev *pdev, void *data)
  */
 static int __pci_tsm_unbind(struct pci_dev *pdev, void *data)
 {
+	struct pci_dev *host = data;
 	struct pci_tdi *tdi;
 	struct pci_tsm_host *tsm_host;
 
 	lockdep_assert_held(&pci_tsm_rwsem);
 
 	if (!pdev->tsm)
+		return 0;
+
+	/*
+	 * When walking a DSM's dependent functions skip any that belong to a
+	 * different DSM in the same slot. A NULL @host is a direct unbind of
+	 * @pdev itself.
+	 */
+	if (host && pdev->tsm->dsm_dev != host)
 		return 0;
 
 	tsm_host = to_pci_tsm_host(pdev->tsm);
@@ -437,7 +467,7 @@ EXPORT_SYMBOL_GPL(pci_tsm_guest_req);
 
 static void pci_tsm_unbind_all(struct pci_dev *pdev)
 {
-	pci_tsm_walk_fns_reverse(pdev, __pci_tsm_unbind, NULL);
+	pci_tsm_walk_fns_reverse(pdev, __pci_tsm_unbind, pdev);
 	__pci_tsm_unbind(pdev, NULL);
 }
 
@@ -451,12 +481,13 @@ static void __pci_tsm_disconnect(struct pci_dev *pdev)
 
 	pci_tsm_unbind_all(pdev);
 
+	pci_tsm_walk_fns_reverse(pdev, remove_fn, pdev);
+
 	/*
 	 * disconnect() is uninterruptible as it may be called for device
 	 * teardown
 	 */
 	guard(mutex)(&tsm_host->lock);
-	pci_tsm_walk_fns_reverse(pdev, remove_fn, NULL);
 	ops->disconnect(pdev);
 }
 
@@ -587,8 +618,17 @@ static umode_t pci_tsm_attr_visible(struct kobject *kobj,
 
 		if (attr == &dev_attr_connect.attr ||
 		    attr == &dev_attr_disconnect.attr) {
-			if (is_pci_tsm_host(pdev))
+			if (is_pci_tsm_host(pdev)) {
+				/*
+				 * Hide while the function is managed by
+				 * another DSM, so userspace cannot connect()
+				 * it independently or disconnect() a context
+				 * that connect() never established.
+				 */
+				if (pdev->tsm && !is_dsm(pdev))
+					return 0;
 				return attr->mode;
+			}
 		}
 	}
 
@@ -662,14 +702,15 @@ static struct pci_dev *find_dsm_dev(struct pci_dev *pdev)
 	struct device *grandparent;
 	struct pci_dev *uport;
 
-	if (is_pci_tsm_host(pdev))
-		return pdev;
-
 	struct pci_dev *pf0 __free(pci_dev_put) = pf0_dev_get(pdev);
-	if (!pf0)
-		return NULL;
 
-	if (is_dsm(pf0))
+	/*
+	 * Functions subordinate to an active DSM are managed by that DSM,
+	 * even if the function itself has a CMA DOE mailbox. Check for the
+	 * DSM context before considering this function to be its own TSM
+	 * host.
+	 */
+	if (pf0 && pf0 != pdev && is_dsm(pf0))
 		return pf0;
 
 	/*
@@ -677,20 +718,24 @@ static struct pci_dev *find_dsm_dev(struct pci_dev *pdev)
 	 * downstream devices, check the first upstream port relative to this
 	 * endpoint.
 	 */
-	if (!pdev->dev.parent)
-		return NULL;
-	grandparent = pdev->dev.parent->parent;
-	if (!grandparent)
-		return NULL;
-	if (!dev_is_pci(grandparent))
-		return NULL;
-	uport = to_pci_dev(grandparent);
-	if (!pci_is_pcie(uport) ||
-	    pci_pcie_type(uport) != PCI_EXP_TYPE_UPSTREAM)
-		return NULL;
+	if (pdev->dev.parent) {
+		grandparent = pdev->dev.parent->parent;
+		if (grandparent && dev_is_pci(grandparent)) {
+			uport = to_pci_dev(grandparent);
+			if (pci_is_pcie(uport) &&
+			    pci_pcie_type(uport) == PCI_EXP_TYPE_UPSTREAM &&
+			    is_dsm(uport))
+				return uport;
+		}
+	}
 
-	if (is_dsm(uport))
-		return uport;
+	/*
+	 * With no DSM context above it, a TSM host capable function (e.g.
+	 * one with a CMA DOE mailbox) is its own host.
+	 */
+	if (is_pci_tsm_host(pdev))
+		return pdev;
+
 	return NULL;
 }
 
@@ -828,7 +873,13 @@ static void __pci_tsm_destroy(struct pci_dev *pdev, struct tsm_dev *tsm_dev)
 	else if (tsm_dev != tsm->tsm_dev)
 		return;
 
-	if (is_link_tsm(tsm_dev) && is_pci_tsm_host(pdev))
+	/*
+	 * Only a device that is actually acting as a DSM (self-hosted,
+	 * connected context) goes through the disconnect() path. A function
+	 * that merely has a CMA mailbox but belongs to another DSM is a
+	 * plain subordinate.
+	 */
+	if (is_link_tsm(tsm_dev) && is_dsm(pdev))
 		pci_tsm_disconnect(pdev);
 	else
 		pci_tsm_fn_exit(pdev);
