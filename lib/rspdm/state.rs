@@ -14,10 +14,15 @@ use kernel::{
         Bound,
         Device, //
     },
-    error::Error,
+    error::{
+        to_result,
+        Error, //
+    },
     hash::Shash,
+    public_key::PublicKey,
     str::CStr,
     validate::Untrusted,
+    x509::Certificate,
 };
 
 use crate::consts::{
@@ -97,7 +102,6 @@ pub(crate) trait Transport {
 ///
 /// `T` is data and an exchange function owned by the caller,
 /// so the borrow checker enforces that the transport data outlives `SpdmState`.
-#[expect(dead_code)]
 pub(crate) struct SpdmState<'a, T: Transport> {
     /// Responder device. Used for error reporting and passed to `transport`.
     pub(crate) dev: &'a Device<Bound>,
@@ -148,6 +152,9 @@ pub(crate) struct SpdmState<'a, T: Transport> {
     /// Certificate chain in each of the 8 slots. Empty `KVec` if a slot is
     /// not populated. Prefixed by the 4 + H header per SPDM 1.0.0 table 15.
     pub(crate) certs: [KVec<u8>; SPDM_SLOTS],
+    /// Public key portion of leaf certificate against which to check
+    /// responder's signatures.
+    pub(crate) leaf_key: Option<PublicKey>,
 }
 
 impl<'a, T: Transport> SpdmState<'a, T> {
@@ -173,6 +180,7 @@ impl<'a, T: Transport> SpdmState<'a, T> {
             sig_len: 0,
             crypto: None,
             certs: [const { KVec::new() }; SPDM_SLOTS],
+            leaf_key: None,
         }
     }
 
@@ -239,6 +247,9 @@ impl<'a, T: Transport> SpdmState<'a, T> {
         let mut request = GetVersionReq::default();
         request.header.version = SPDM_MIN_VER;
         self.version = SPDM_MIN_VER;
+
+        // Clear the leaf cert as we are re-authenticating
+        self.leaf_key = None;
 
         let mut request_buf = request.to_bytes()?;
 
@@ -548,6 +559,47 @@ impl<'a, T: Transport> SpdmState<'a, T> {
 
         self.certs[slot as usize].clear();
         self.certs[slot as usize].extend_from_slice(&certs_buf, GFP_KERNEL)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_cert_chain(&mut self, slot: u8) -> Result<(), Error> {
+        let cert_chain_buf = &self.certs[slot as usize];
+        let cert_chain_len = cert_chain_buf.len();
+        // We skip over the RootHash
+        let mut offset = SPDM_CERT_CHAIN_HDR_SZ + self.hash_len();
+
+        if offset >= cert_chain_len {
+            return Err(EPROTO);
+        }
+
+        let mut prev_cert: Option<Certificate> = None;
+
+        while offset < cert_chain_len {
+            let (cert, cert_len) = Certificate::parse(&cert_chain_buf[offset..])?;
+            cert.check_accepted()?;
+
+            if let Some(prev) = &prev_cert {
+                prev.verify_signed(&cert)?;
+            }
+
+            let _ = prev_cert.replace(cert);
+            offset += cert_len;
+        }
+
+        if let Some(mut cert) = prev_cert.take() {
+            if let Some(validate) = self.validate {
+                // SAFETY: Call the `validate` function provided.
+                let rc = unsafe { validate(self.dev.as_raw(), slot, cert.raw()) };
+                to_result(rc)?;
+            }
+
+            // The leaf key is the same for all slots (MULT_KEY_CAP == 0),
+            // so just store the first one.
+            if self.leaf_key.is_none() {
+                self.leaf_key = cert.take_public_key();
+            }
+        }
 
         Ok(())
     }
