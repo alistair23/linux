@@ -12,31 +12,62 @@ use kernel::{
     bindings,
     device::Device,
     error::Error,
+    hash::Shash,
     page::PAGE_SIZE,
+    str::CStr,
     sync::aref::ARef,
     validate::Untrusted, //
 };
 
 use crate::consts::{
+    SPDM_ASYM_ALGOS,
     SPDM_ERROR,
     SPDM_GET_VERSION_LEN,
+    SPDM_HASH_ALGOS,
+    SPDM_KEY_EX_CAP,
     SPDM_MAX_VER,
+    SPDM_MEAS_RESP_CAP,
+    SPDM_MEAS_SPEC_DMTF,
     SPDM_MIN_VER,
     SPDM_MULTI_KEY_CAP,
+    SPDM_OPAQUE_DATA_FMT_GENERAL,
     SPDM_REQ,
     SPDM_RSP_MIN_CAPS,
     SPDM_VER_10,
     SPDM_VER_11,
     SPDM_VER_12, //
 };
+
+#[cfg(CONFIG_CRYPTO_SHA256)]
+use crate::consts::SPDM_HASH_SHA_256;
+#[cfg(CONFIG_CRYPTO_ECDSA)]
+use crate::consts::{
+    SPDM_ASYM_ECDSA_ECC_NIST_P256,
+    SPDM_ASYM_ECDSA_ECC_NIST_P384,
+    SPDM_ASYM_ECDSA_ECC_NIST_P521, //
+};
+#[cfg(CONFIG_CRYPTO_RSA)]
+use crate::consts::{
+    SPDM_ASYM_RSASSA_2048,
+    SPDM_ASYM_RSASSA_3072,
+    SPDM_ASYM_RSASSA_4096, //
+};
+#[cfg(CONFIG_CRYPTO_SHA512)]
+use crate::consts::{
+    SPDM_HASH_SHA_384,
+    SPDM_HASH_SHA_512, //
+};
 use crate::validator::{
     GetCapabilitiesReq,
     GetCapabilitiesRsp,
     GetVersionReq,
     GetVersionRsp,
+    NegotiateAlgsReq,
+    NegotiateAlgsRsp,
     SpdmErrorRsp,
     SpdmHeader,
-    GET_CAPABILITIES_RSP_SZ, //
+    GET_CAPABILITIES_RSP_SZ,
+    NEGOTIATE_ALGS_RSP_SZ, //
 };
 
 /// Transport for exchanging SPDM messages with a responder device.
@@ -87,6 +118,27 @@ pub(crate) struct SpdmState<T: Transport> {
     /// Cached capabilities of responder. Received during GET_CAPABILITIES
     /// exchange.
     pub(crate) rsp_caps: u32,
+    /// Asymmetric key algorithm for signature verification of CHALLENGE_AUTH
+    /// and MEASUREMENTS messages. Selected by responder during
+    /// NEGOTIATE_ALGORITHMS exchange.
+    pub(crate) base_asym_alg: u32,
+    /// Hash algorithm for signature verification of CHALLENGE_AUTH and
+    /// MEASUREMENTS messages. Selected by responder during
+    /// NEGOTIATE_ALGORITHMS exchange.
+    pub(crate) base_hash_alg: u32,
+    /// Hash algorithm for measurement blocks. Selected by responder during
+    /// NEGOTIATE_ALGORITHMS exchange.
+    pub(crate) meas_hash_alg: u32,
+
+    /// Human-readable name of `base_asym_alg`'s signature encoding. Passed
+    /// to the crypto subsystem when calling `verify_signature()`.
+    base_asym_enc: &'static CStr,
+    /// Signature length of `base_asym_alg` (in bytes). S or SigLen in SPDM
+    /// specification.
+    sig_len: usize,
+
+    /// Hash transformation for `base_hash_alg` computation.
+    crypto: Option<Shash>,
 }
 
 impl<T: Transport> SpdmState<T> {
@@ -109,6 +161,12 @@ impl<T: Transport> SpdmState<T> {
             validate,
             version: SPDM_MIN_VER,
             rsp_caps: 0,
+            base_asym_alg: 0,
+            base_hash_alg: 0,
+            meas_hash_alg: 0,
+            base_asym_enc: c"",
+            sig_len: 0,
+            crypto: None,
         }
     }
 
@@ -262,6 +320,115 @@ impl<T: Transport> SpdmState<T> {
             // re-authentication starts from `transport_sz` again.
             self.data_transfer_sz = self.transport_sz.min(response.data_transfer_size);
         }
+
+        Ok(())
+    }
+
+    fn update_response_algs(&mut self) -> Result<(), Error> {
+        match self.base_asym_alg {
+            #[cfg(CONFIG_CRYPTO_RSA)]
+            SPDM_ASYM_RSASSA_2048 => {
+                self.sig_len = 256;
+                self.base_asym_enc = c"pkcs1";
+            }
+            #[cfg(CONFIG_CRYPTO_RSA)]
+            SPDM_ASYM_RSASSA_3072 => {
+                self.sig_len = 384;
+                self.base_asym_enc = c"pkcs1";
+            }
+            #[cfg(CONFIG_CRYPTO_RSA)]
+            SPDM_ASYM_RSASSA_4096 => {
+                self.sig_len = 512;
+                self.base_asym_enc = c"pkcs1";
+            }
+            #[cfg(CONFIG_CRYPTO_ECDSA)]
+            SPDM_ASYM_ECDSA_ECC_NIST_P256 => {
+                self.sig_len = 64;
+                self.base_asym_enc = c"p1363";
+            }
+            #[cfg(CONFIG_CRYPTO_ECDSA)]
+            SPDM_ASYM_ECDSA_ECC_NIST_P384 => {
+                self.sig_len = 96;
+                self.base_asym_enc = c"p1363";
+            }
+            #[cfg(CONFIG_CRYPTO_ECDSA)]
+            SPDM_ASYM_ECDSA_ECC_NIST_P521 => {
+                self.sig_len = 132;
+                self.base_asym_enc = c"p1363";
+            }
+            _ => {
+                dev_err!(&self.dev, "Unknown asym algorithm\n");
+                return Err(EPROTO);
+            }
+        }
+
+        let hash_name = match self.base_hash_alg {
+            #[cfg(CONFIG_CRYPTO_SHA256)]
+            SPDM_HASH_SHA_256 => c"sha256",
+            #[cfg(CONFIG_CRYPTO_SHA512)]
+            SPDM_HASH_SHA_384 => c"sha384",
+            #[cfg(CONFIG_CRYPTO_SHA512)]
+            SPDM_HASH_SHA_512 => c"sha512",
+            _ => {
+                dev_err!(&self.dev, "Unknown hash algorithm\n");
+                return Err(EPROTO);
+            }
+        };
+
+        self.crypto = Some(Shash::new(hash_name)?);
+
+        Ok(())
+    }
+
+    pub(crate) fn negotiate_algs(&mut self) -> Result<(), Error> {
+        let mut request = NegotiateAlgsReq::default();
+        request.header.version = self.version;
+
+        if self.version >= SPDM_VER_12 && (self.rsp_caps & SPDM_KEY_EX_CAP) == SPDM_KEY_EX_CAP {
+            request.other_params_support = SPDM_OPAQUE_DATA_FMT_GENERAL;
+        }
+
+        // We never offer extended algorithms or algorithm structures, so a
+        // compliant response is exactly NEGOTIATE_ALGS_RSP_SZ bytes.
+        let rsp_sz = NEGOTIATE_ALGS_RSP_SZ.min(self.data_transfer_sz as usize);
+
+        request.length = NegotiateAlgsReq::WIRE_SIZE as u16;
+
+        let mut request_buf = request.to_bytes()?;
+
+        let response_vec: KVec<u8> = KVec::from_elem(0u8, rsp_sz, GFP_KERNEL)?;
+
+        let response: NegotiateAlgsRsp = self
+            .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
+            .validate(&*self)?;
+
+        self.base_asym_alg = response.base_asym_sel;
+        self.base_hash_alg = response.base_hash_sel;
+        self.meas_hash_alg = response.measurement_hash_algo;
+
+        if self.base_asym_alg & SPDM_ASYM_ALGOS == 0 || self.base_hash_alg & SPDM_HASH_ALGOS == 0 {
+            dev_err!(&self.dev, "No common supported algorithms\n");
+            return Err(EPROTO);
+        }
+
+        let meas_hash_valid = if self.rsp_caps & SPDM_MEAS_RESP_CAP != 0 {
+            response.measurement_specification_sel == SPDM_MEAS_SPEC_DMTF
+                && self.meas_hash_alg.count_ones() == 1
+        } else {
+            response.measurement_specification_sel == 0 && self.meas_hash_alg == 0
+        };
+
+        // /* Responder shall select exactly 1 alg (SPDM 1.0.0 table 14) */
+        if self.base_asym_alg.count_ones() != 1
+            || self.base_hash_alg.count_ones() != 1
+            || !meas_hash_valid
+            || response.other_params_sel != request.other_params_support
+        {
+            dev_err!(&self.dev, "Malformed algorithms response\n");
+            return Err(EPROTO);
+        }
+
+        self.update_response_algs()?;
 
         Ok(())
     }
