@@ -12,6 +12,7 @@ use kernel::{
     bindings,
     device::Device,
     error::Error,
+    page::PAGE_SIZE,
     sync::aref::ARef,
     validate::Untrusted, //
 };
@@ -21,13 +22,21 @@ use crate::consts::{
     SPDM_GET_VERSION_LEN,
     SPDM_MAX_VER,
     SPDM_MIN_VER,
-    SPDM_REQ, //
+    SPDM_MULTI_KEY_CAP,
+    SPDM_REQ,
+    SPDM_RSP_MIN_CAPS,
+    SPDM_VER_10,
+    SPDM_VER_11,
+    SPDM_VER_12, //
 };
 use crate::validator::{
+    GetCapabilitiesReq,
+    GetCapabilitiesRsp,
     GetVersionReq,
     GetVersionRsp,
     SpdmErrorRsp,
-    SpdmHeader, //
+    SpdmHeader,
+    GET_CAPABILITIES_RSP_SZ, //
 };
 
 /// Transport for exchanging SPDM messages with a responder device.
@@ -75,6 +84,9 @@ pub(crate) struct SpdmState<T: Transport> {
     /// Maximum common supported version of requester and responder.
     /// Negotiated during GET_VERSION exchange.
     pub(crate) version: u8,
+    /// Cached capabilities of responder. Received during GET_CAPABILITIES
+    /// exchange.
+    pub(crate) rsp_caps: u32,
 }
 
 impl<T: Transport> SpdmState<T> {
@@ -96,6 +108,7 @@ impl<T: Transport> SpdmState<T> {
             data_transfer_sz: transport_sz,
             validate,
             version: SPDM_MIN_VER,
+            rsp_caps: 0,
         }
     }
 
@@ -189,6 +202,65 @@ impl<T: Transport> SpdmState<T> {
         if !foundver {
             dev_err!(&self.dev, "No common supported version\n");
             return Err(EPROTO);
+        }
+
+        Ok(())
+    }
+
+    /// Obtain the supported capabilities from an SPDM session and store the
+    /// information in the `SpdmState`.
+    pub(crate) fn get_capabilities(&mut self) -> Result<(), Error> {
+        let mut request = GetCapabilitiesReq::default();
+        request.header.version = self.version;
+
+        let rsp_sz = match self.version {
+            SPDM_VER_10 | SPDM_VER_11 => {
+                core::mem::size_of::<SpdmHeader>() + 4 + core::mem::size_of::<u32>()
+            }
+            _ => {
+                request.data_transfer_size = self.transport_sz;
+                request.max_spdm_msg_size = self.transport_sz;
+
+                (GET_CAPABILITIES_RSP_SZ + PAGE_SIZE).min(self.data_transfer_sz as usize)
+            }
+        };
+
+        let mut request_buf = request.to_bytes()?;
+
+        let response_vec: KVec<u8> = KVec::from_elem(0u8, rsp_sz, GFP_KERNEL)?;
+
+        let response: GetCapabilitiesRsp = self
+            .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
+            .validate(&*self)?;
+
+        self.rsp_caps = response.flags;
+        if (self.rsp_caps & SPDM_RSP_MIN_CAPS) != SPDM_RSP_MIN_CAPS {
+            dev_err!(
+                &self.dev,
+                "{:#x} capabilities are supported, which don't meet required {:#x}\n",
+                self.rsp_caps,
+                SPDM_RSP_MIN_CAPS
+            );
+            self.rsp_caps = 0;
+            return Err(EPROTONOSUPPORT);
+        }
+
+        if self.rsp_caps & SPDM_MULTI_KEY_CAP != 0
+            && self.rsp_caps & SPDM_MULTI_KEY_CAP != 0b10 << 26
+        {
+            dev_err!(
+                &self.dev,
+                "Multi-key capable responders are not supported\n"
+            );
+            self.rsp_caps = 0;
+            return Err(EPROTONOSUPPORT);
+        }
+
+        if self.version >= SPDM_VER_12 {
+            // Negotiate the session's transfer size without permanently
+            // shrinking the transport's own capability, so that
+            // re-authentication starts from `transport_sz` again.
+            self.data_transfer_sz = self.transport_sz.min(response.data_transfer_size);
         }
 
         Ok(())
