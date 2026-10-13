@@ -901,7 +901,9 @@ impl<'a, 'c> Validate<'c, Untrusted<&'a [u8]>> for SpdmCertChain {
         let cert_chain_end = length as usize;
         let mut certificates = KVec::new();
         certificates.extend_from_slice(
-            unvalidated.get(root_hash_end..cert_chain_end).ok_or(EPROTO)?,
+            unvalidated
+                .get(root_hash_end..cert_chain_end)
+                .ok_or(EPROTO)?,
             GFP_KERNEL,
         )?;
 
@@ -972,7 +974,10 @@ impl<'c> Validate<'c, Untrusted<KVec<u8>>> for GetCertificateRsp {
         let cert_chain_end = 8 + portion_length as usize;
 
         let mut cert_chain = KVec::new();
-        cert_chain.extend_from_slice(unvalidated.get(8..cert_chain_end).ok_or(EPROTO)?, GFP_KERNEL)?;
+        cert_chain.extend_from_slice(
+            unvalidated.get(8..cert_chain_end).ok_or(EPROTO)?,
+            GFP_KERNEL,
+        )?;
 
         Ok(GetCertificateRsp {
             header,

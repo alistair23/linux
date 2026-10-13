@@ -81,7 +81,6 @@ use crate::validator::{
 ///
 /// The lifetime `'a` is the duration for which the responder device is
 /// guaranteed to stay alive and bound to its driver.
-#[expect(dead_code)]
 pub(crate) struct SpdmState<'a> {
     /// Responder device. Used for error reporting and passed to `transport`.
     pub(crate) dev: &'a Device<Bound>,
@@ -132,18 +131,34 @@ pub(crate) struct SpdmState<'a> {
     base_hash_alg_name: &'static CStr,
     /// Synchronous hash handle for `base_hash_alg` computation.
     pub(crate) shash: *mut bindings::crypto_shash,
-    /// Synchronous hash context for `base_hash_alg` computation.
+    /// Synchronous hash context for `base_hash_alg` computation, allocated
+    /// from a `KVec<u8>` of `desc_capacity` bytes.
     pub(crate) desc: *mut bindings::shash_desc,
+    /// Capacity of the `KVec<u8>` backing `desc`, needed to rebuild the
+    /// vector for freeing.
+    desc_capacity: usize,
     /// Hash length of `base_hash_alg` (in bytes). H in SPDM specification.
     pub(crate) hash_len: usize,
 
     /// Certificate chain in each of the 8 slots. Empty `KVec` if a slot is
     /// not populated. Prefixed by the 4 + H header per SPDM 1.0.0 table 15.
     pub(crate) certs: [KVec<u8>; SPDM_SLOTS],
+    /// Public key portion of leaf certificate against which to check
+    /// responder's signatures.
+    pub(crate) leaf_key: Option<*mut bindings::public_key>,
 }
 
 impl Drop for SpdmState<'_> {
     fn drop(&mut self) {
+        if let Some(leaf_key) = self.leaf_key.take() {
+            // SAFETY: `leaf_key` was extracted from a x509 certificate
+            // in `validate_cert_chain()` so it is valid to pass to
+            // `public_key_free()`.
+            unsafe {
+                bindings::public_key_free(leaf_key);
+            }
+        }
+
         self.free_desc();
 
         // SAFETY: `self.shash` is either a valid handle or NULL,
@@ -182,8 +197,10 @@ impl<'a> SpdmState<'a> {
             base_hash_alg_name: c"",
             shash: core::ptr::null_mut(),
             desc: core::ptr::null_mut(),
+            desc_capacity: 0,
             hash_len: 0,
             certs: [const { KVec::new() }; SPDM_SLOTS],
+            leaf_key: None,
         }
     }
 
@@ -195,11 +212,14 @@ impl<'a> SpdmState<'a> {
                 + unsafe { bindings::crypto_shash_descsize(self.shash) } as usize;
 
             // SAFETY: `desc` points to a KVec<u8> allocation of `desc_len`
-            // bytes handed out with `KVec::into_raw_parts()`.
-            let desc_vec =
-                unsafe { KVec::<u8>::from_raw_parts(self.desc.cast::<u8>(), desc_len, desc_len) };
+            // bytes and `desc_capacity` capacity handed out with
+            // `KVec::into_raw_parts()`.
+            let desc_vec = unsafe {
+                KVec::<u8>::from_raw_parts(self.desc.cast::<u8>(), desc_len, self.desc_capacity)
+            };
             drop(desc_vec);
             self.desc = core::ptr::null_mut();
+            self.desc_capacity = 0;
         }
     }
 
@@ -439,8 +459,9 @@ impl<'a> SpdmState<'a> {
 
         let desc_vec: KVec<u8> = KVec::from_elem(0u8, desc_len, GFP_KERNEL)?;
         // Consume the desc_vec to make sure it isn't dropped, untill we
-        // manually drop it later
-        let (desc_buf, _length, _capacity) = desc_vec.into_raw_parts();
+        // manually drop it later. Remember the capacity of the vector so the
+        // allocation can be rebuilt exactly in `free_desc()`.
+        let (desc_buf, _length, capacity) = desc_vec.into_raw_parts();
 
         let desc = desc_buf.cast::<bindings::shash_desc>();
 
@@ -449,6 +470,7 @@ impl<'a> SpdmState<'a> {
         unsafe { (*desc).tfm = self.shash };
 
         self.desc = desc;
+        self.desc_capacity = capacity;
 
         // Used frequently to compute offsets, so cache H
         // SAFETY: `self.shash` is a valid handle (verified above).
@@ -635,6 +657,140 @@ impl<'a> SpdmState<'a> {
 
         self.certs[slot as usize].clear();
         self.certs[slot as usize].extend_from_slice(&certs_buf, GFP_KERNEL)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_cert_chain(&mut self, slot: u8) -> Result<(), Error> {
+        let cert_chain_buf = &self.certs[slot as usize];
+        let cert_chain_len = cert_chain_buf.len();
+        // We skip over the RootHash
+        let header_len = 4 + self.hash_len;
+
+        let mut offset = header_len;
+        let mut prev_cert: Option<*mut bindings::x509_certificate> = None;
+
+        if offset >= cert_chain_len {
+            return Err(EPROTO);
+        }
+
+        while offset < cert_chain_len {
+            // SAFETY: `cert_chain_buf[offset..]` is a non-empty slice of
+            // bytes valid for at least `cert_chain_len` bytes.
+            let cert_len = unsafe {
+                bindings::x509_get_certificate_length(
+                    core::ptr::from_ref(&cert_chain_buf[offset..]).cast::<u8>(),
+                    cert_chain_len - offset,
+                )
+            };
+
+            if cert_len < 0 {
+                pr_err!("Invalid certificate length\n");
+
+                if let Some(prev) = prev_cert {
+                    // SAFETY: `prev_cert` is the previously parsed
+                    // certificate from a prior loop iteration.
+                    unsafe { bindings::x509_free_certificate(prev) };
+                }
+
+                to_result(cert_len as i32)?;
+            }
+
+            // SAFETY: `cert_chain_buf[offset..]` is a non-empty slice of
+            // bytes valid for at least `cert_len` bytes.
+            let cert_ptr = unsafe {
+                match from_err_ptr(bindings::x509_cert_parse(
+                    core::ptr::from_ref(&cert_chain_buf[offset..]).cast::<c_void>(),
+                    cert_len as usize,
+                )) {
+                    Err(e) => {
+                        if let Some(prev) = prev_cert {
+                            // SAFETY: `prev_cert` is the previously parsed
+                            // certificate from a prior loop iteration.
+                            bindings::x509_free_certificate(prev);
+                        }
+                        return Err(e);
+                    }
+                    Ok(c) => c,
+                }
+            };
+            // SAFETY: `cert_ptr` was just returned by `x509_cert_parse()`
+            // and remains valid until freed below.
+            let cert = unsafe { &*cert_ptr };
+
+            if cert.unsupported_sig || cert.blacklisted {
+                pr_err!("Certificate was rejected\n");
+
+                if let Some(prev) = prev_cert {
+                    // SAFETY: `prev_cert` is the previously parsed
+                    // certificate from a prior loop iteration.
+                    unsafe { bindings::x509_free_certificate(prev) };
+                }
+                // SAFETY: `cert_ptr` was just returned by
+                // `x509_cert_parse()`.
+                unsafe { bindings::x509_free_certificate(cert_ptr) };
+
+                return Err(EKEYREJECTED);
+            }
+
+            if let Some(prev) = prev_cert {
+                // SAFETY: `prev_cert` is the previously parsed
+                // certificate from a prior loop iteration.
+                let rc = unsafe { bindings::public_key_verify_signature((*prev).pub_, cert.sig) };
+
+                if rc < 0 {
+                    pr_err!("Signature validation error\n");
+
+                    // SAFETY: `prev_cert` is the previously parsed
+                    // certificate from a prior loop iteration.
+                    unsafe { bindings::x509_free_certificate(prev) };
+
+                    // SAFETY: `cert_ptr` was just returned by
+                    // `x509_cert_parse()`.
+                    unsafe { bindings::x509_free_certificate(cert_ptr) };
+
+                    to_result(rc)?;
+                }
+            }
+
+            if let Some(prev) = prev_cert {
+                // SAFETY: `prev_cert` is the previously parsed
+                // certificate from a prior loop iteration.
+                unsafe { bindings::x509_free_certificate(prev) };
+            }
+
+            prev_cert = Some(cert_ptr);
+            offset += cert_len as usize;
+        }
+
+        if let Some(prev) = prev_cert {
+            if let Some(validate) = self.validate {
+                // SAFETY: Call the `validate` function provided.
+                let rc = unsafe { validate(self.dev.as_raw(), slot, prev) };
+                if let Err(e) = to_result(rc) {
+                    // SAFETY: `prev_cert` is the previously parsed
+                    // certificate from a prior loop iteration.
+                    unsafe { bindings::x509_free_certificate(prev) };
+                    return Err(e);
+                }
+            }
+
+            // The leaf key is the same for all slots (MULT_KEY_CAP == 0),
+            // so just store the first one.
+            if self.leaf_key.is_none() {
+                // SAFETY: `prev_cert` is the previously parsed
+                // certificate from a prior loop iteration.
+                self.leaf_key = unsafe { Some((*prev).pub_) };
+                // SAFETY: `prev_cert` is the previously parsed
+                // certificate from a prior loop iteration. We are setting
+                // the `pub` key to null so it isn't freed below
+                unsafe { (*prev).pub_ = core::ptr::null_mut() };
+            }
+
+            // SAFETY: `prev_cert` is the previously parsed
+            // certificate from a prior loop iteration.
+            unsafe { bindings::x509_free_certificate(prev) };
+        }
 
         Ok(())
     }
