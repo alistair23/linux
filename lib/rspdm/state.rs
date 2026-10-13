@@ -11,12 +11,17 @@ use kernel::prelude::*;
 use kernel::{
     bindings,
     device::Device,
-    error::Error,
+    error::{
+        to_result,
+        Error, //
+    },
     hash::Shash,
     page::PAGE_SIZE,
+    public_key::PublicKey,
     str::CStr,
     sync::aref::ARef,
-    validate::Untrusted, //
+    validate::Untrusted,
+    x509::Certificate, //
 };
 
 use crate::consts::{
@@ -102,7 +107,6 @@ pub(crate) trait Transport {
 /// it does not need to stay bound to its driver. `T` is data and an
 /// exchange function owned by the caller, so the borrow checker enforces
 /// that the transport data outlives `SpdmState`.
-#[expect(dead_code)]
 pub(crate) struct SpdmState<T: Transport> {
     /// Responder device (reference counted). Used for error reporting and
     /// passed to `transport`.
@@ -161,6 +165,9 @@ pub(crate) struct SpdmState<T: Transport> {
     /// Hash of each slot's certificate chain, as reported by the DIGESTS
     /// response. Empty `KVec` if a slot is not provisioned.
     pub(crate) digests: [KVec<u8>; SPDM_SLOTS],
+    /// Public key portion of leaf certificate against which to check
+    /// responder's signatures.
+    pub(crate) leaf_key: Option<PublicKey>,
 }
 
 impl<T: Transport> SpdmState<T> {
@@ -193,6 +200,7 @@ impl<T: Transport> SpdmState<T> {
             crypto: None,
             certs: [const { KVec::new() }; SPDM_SLOTS],
             digests: [const { KVec::new() }; SPDM_SLOTS],
+            leaf_key: None,
         }
     }
 
@@ -267,6 +275,9 @@ impl<T: Transport> SpdmState<T> {
         for digest in self.digests.as_mut() {
             digest.clear();
         }
+
+        // Clear the leaf cert as we are re-authenticating
+        self.leaf_key = None;
 
         let mut request_buf = request.to_bytes()?;
 
@@ -593,8 +604,163 @@ impl<T: Transport> SpdmState<T> {
             return Err(EPROTO);
         }
 
+        // The chain must match the digest reported for this slot by the
+        // DIGESTS response (DSP0274 "GET_CERTIFICATE" certificates).
+        self.verify_slot_digest(slot, &certs_buf)?;
+
+        // Verify the RootHash embedded in the chain header against the root
+        // certificate it contains (DSP0274 "SpdmCertChain" table).
+        self.verify_root_hash(&certs_buf)?;
+
         self.certs[slot as usize].clear();
         self.certs[slot as usize].extend_from_slice(&certs_buf, GFP_KERNEL)?;
+
+        Ok(())
+    }
+
+    /// Hash `data` with the negotiated base hash algorithm.
+    fn digest_data(&mut self, data: &[u8]) -> Result<KVec<u8>, Error> {
+        let crypto = self.crypto.as_mut().ok_or(EPROTO)?;
+
+        let mut digest: KVec<u8> = KVec::new();
+        digest.extend_with(crypto.hash_len(), 0, GFP_KERNEL)?;
+        crypto.digest(data, digest.as_mut_slice())?;
+
+        Ok(digest)
+    }
+
+    /// Verify that the digest of `chain` matches the digest reported for
+    /// `slot` by the DIGESTS response.
+    fn verify_slot_digest(&mut self, slot: u8, chain: &[u8]) -> Result<(), Error> {
+        let digest = self.digest_data(chain)?;
+        let expected = &self.digests[slot as usize];
+
+        if expected.is_empty() {
+            dev_err!(&self.dev, "No digest reported for slot {slot}\n");
+            return Err(EPROTO);
+        }
+
+        if digest.as_slice() != expected.as_slice() {
+            dev_err!(
+                &self.dev,
+                "Certificate chain of slot {slot} does not match its digest\n"
+            );
+            return Err(EKEYREJECTED);
+        }
+
+        Ok(())
+    }
+
+    /// Verify that the RootHash field in the chain header is the hash of
+    /// the root certificate contained in `chain`.
+    fn verify_root_hash(&mut self, chain: &[u8]) -> Result<(), Error> {
+        let root_hash = chain
+            .get(SPDM_CERT_CHAIN_HDR_SZ..SPDM_CERT_CHAIN_HDR_SZ + self.hash_len())
+            .ok_or(EPROTO)?;
+        let certs_start = SPDM_CERT_CHAIN_HDR_SZ + self.hash_len();
+
+        // SAFETY: `chain[certs_start..]` is a valid slice; the function
+        // reads at most the DER certificate length within it.
+        let root_len = unsafe {
+            bindings::x509_get_certificate_length(
+                chain.get(certs_start..).ok_or(EPROTO)?.as_ptr(),
+                chain.len() - certs_start,
+            )
+        };
+        let root_len = usize::try_from(root_len).map_err(|_| EPROTO)?;
+
+        let root = chain
+            .get(certs_start..certs_start + root_len)
+            .ok_or(EPROTO)?;
+
+        if self.digest_data(root)?.as_slice() != root_hash {
+            dev_err!(&self.dev, "RootHash does not match the root certificate\n");
+            return Err(EKEYREJECTED);
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_cert_chain(&mut self, slot: u8) -> Result<(), Error> {
+        let cert_chain_buf = &self.certs[slot as usize];
+        let cert_chain_len = cert_chain_buf.len();
+        // We skip over the RootHash
+        let mut offset = SPDM_CERT_CHAIN_HDR_SZ + self.hash_len();
+
+        if offset >= cert_chain_len {
+            return Err(EPROTO);
+        }
+
+        let mut prev_cert: Option<Certificate<'_>> = None;
+        let mut cert_count = 0;
+
+        while offset < cert_chain_len {
+            let (cert, cert_len) = Certificate::parse(&cert_chain_buf[offset..])?;
+            cert.check_accepted()?;
+
+            if let Some(prev) = &prev_cert {
+                // Every issuer in the chain must be a CA allowed to sign
+                // certificates, and the signed certificate's issuer must
+                // match the issuer's subject (RFC 5280). An absent keyUsage
+                // extension places no restriction on the key's usage.
+                let flags = prev.key_ext_flags()?;
+                if !flags.is_ca() {
+                    dev_err!(
+                        &self.dev,
+                        "Certificate issuer lacks the CA basic constraint\n"
+                    );
+                    return Err(EKEYREJECTED);
+                }
+
+                if prev.raw_subject() != cert.raw_issuer() {
+                    dev_err!(
+                        &self.dev,
+                        "Certificate issuer does not match the previous subject\n"
+                    );
+                    return Err(EKEYREJECTED);
+                }
+
+                prev.verify_signed(&cert)?;
+            }
+
+            let _ = prev_cert.replace(cert);
+            offset += cert_len;
+            cert_count += 1;
+        }
+
+        // A chain must contain at least a root CA and a leaf certificate;
+        // a single certificate would receive no signature verification.
+        if cert_count < 2 {
+            dev_err!(
+                &self.dev,
+                "Certificate chain must contain at least a root and a leaf\n"
+            );
+            return Err(EKEYREJECTED);
+        }
+
+        let Some(mut leaf) = prev_cert.take() else {
+            return Err(EPROTO);
+        };
+
+        let flags = leaf.key_ext_flags()?;
+        if flags.is_ca() || !flags.digital_signature() {
+            dev_err!(&self.dev, "Invalid leaf certificate constraints\n");
+            return Err(EKEYREJECTED);
+        }
+
+        // The leaf key is the same for all slots (MULT_KEY_CAP == 0),
+        // so just store the first one.
+        if self.leaf_key.is_none() {
+            self.leaf_key = leaf.take_public_key();
+        }
+
+        if let Some(validate) = self.validate {
+            // SAFETY: Call the `validate` function provided with a valid
+            // certificate pointer, which the callback must not modify or
+            // free.
+            let rc = unsafe { validate(self.dev.as_raw(), slot, leaf.as_raw()) };
+            to_result(rc)?;
+        }
 
         Ok(())
     }
