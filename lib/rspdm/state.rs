@@ -19,6 +19,7 @@ use kernel::{
     page::PAGE_SIZE,
     public_key::PublicKey,
     str::CStr,
+    str::CString,
     sync::aref::ARef,
     validate::Untrusted,
     x509::Certificate, //
@@ -26,16 +27,19 @@ use kernel::{
 
 use crate::consts::{
     SPDM_ASYM_ALGOS,
+    SPDM_COMBINED_PREFIX_SZ,
     SPDM_ERROR,
     SPDM_GET_VERSION_LEN,
     SPDM_HASH_ALGOS,
     SPDM_KEY_EX_CAP,
+    SPDM_MAX_OPAQUE_DATA,
     SPDM_MAX_VER,
     SPDM_MEAS_RESP_CAP,
     SPDM_MEAS_SPEC_DMTF,
     SPDM_MIN_VER,
     SPDM_MULTI_KEY_CAP,
     SPDM_OPAQUE_DATA_FMT_GENERAL,
+    SPDM_PREFIX_SZ,
     SPDM_REQ,
     SPDM_RSP_MIN_CAPS,
     SPDM_SLOTS,
@@ -65,6 +69,8 @@ use crate::consts::{
     SPDM_HASH_SHA_512, //
 };
 use crate::validator::{
+    ChallengeReq,
+    ChallengeRsp,
     GetCapabilitiesReq,
     GetCapabilitiesRsp,
     GetCertificateReq,
@@ -83,6 +89,8 @@ use crate::validator::{
     NEGOTIATE_ALGS_RSP_SZ,
     SPDM_CERT_CHAIN_HDR_SZ, //
 };
+
+const SPDM_CONTEXT: &str = "responder-challenge_auth signing";
 
 /// Transport for exchanging SPDM messages with a responder device.
 ///
@@ -154,7 +162,7 @@ pub(crate) struct SpdmState<T: Transport> {
     base_asym_enc: &'static CStr,
     /// Signature length of `base_asym_alg` (in bytes). S or SigLen in SPDM
     /// specification.
-    sig_len: usize,
+    pub(crate) sig_len: usize,
 
     /// Hash transformation for `base_hash_alg` computation.
     crypto: Option<Shash>,
@@ -168,6 +176,16 @@ pub(crate) struct SpdmState<T: Transport> {
     /// Public key portion of leaf certificate against which to check
     /// responder's signatures.
     pub(crate) leaf_key: Option<PublicKey>,
+
+    /// Concatenation of all SPDM messages exchanged during an authentication
+    /// or measurement sequence. Used to verify the signature, as it is
+    /// computed over the hashed transcript.
+    transcript: VVec<u8>,
+
+    /// Requester nonce to be used for the next authentication sequence.
+    /// Populated from user space through sysfs. If user space does not
+    /// provide a nonce, the kernel uses a random one.
+    pub(crate) next_nonce: KVec<u8>,
 }
 
 impl<T: Transport> SpdmState<T> {
@@ -201,6 +219,8 @@ impl<T: Transport> SpdmState<T> {
             certs: [const { KVec::new() }; SPDM_SLOTS],
             digests: [const { KVec::new() }; SPDM_SLOTS],
             leaf_key: None,
+            transcript: VVec::new(),
+            next_nonce: KVec::new(),
         }
     }
 
@@ -217,12 +237,14 @@ impl<T: Transport> SpdmState<T> {
     /// The data in `request_buf` is sent to the device and the response
     /// is returned as untrusted data to be validated by the caller.
     pub(crate) fn spdm_exchange(
-        &self,
+        &mut self,
         request_buf: &[u8],
         mut response_buf: KVec<u8>,
     ) -> Result<Untrusted<KVec<u8>>, Error> {
         let header_size = core::mem::size_of::<SpdmHeader>();
-        let request: SpdmHeader = Untrusted::new(request_buf).validate(self)?;
+        let request: SpdmHeader = Untrusted::new(request_buf).validate(&*self)?;
+
+        self.transcript.extend_from_slice(request_buf, GFP_KERNEL)?;
 
         let length =
             self.transport
@@ -240,11 +262,11 @@ impl<T: Transport> SpdmState<T> {
         response_buf.truncate(length);
 
         let response: SpdmHeader =
-            Untrusted::new(response_buf.get(..header_size).ok_or(EPROTO)?).validate(self)?;
+            Untrusted::new(response_buf.get(..header_size).ok_or(EPROTO)?).validate(&*self)?;
 
         if response.code == SPDM_ERROR {
             let error_rsp: SpdmErrorRsp =
-                Untrusted::new(response_buf.get(..header_size).ok_or(EPROTO)?).validate(self)?;
+                Untrusted::new(response_buf.get(..header_size).ok_or(EPROTO)?).validate(&*self)?;
             dev_err!(&self.dev, "Error response: {error_rsp:?}\n");
             return Err(error_rsp.error_code.into());
         }
@@ -272,6 +294,8 @@ impl<T: Transport> SpdmState<T> {
         // Reset all negotiated session state as we are re-authenticating
         self.data_transfer_sz = self.transport_sz;
 
+        self.transcript.clear();
+
         for digest in self.digests.as_mut() {
             digest.clear();
         }
@@ -286,6 +310,9 @@ impl<T: Transport> SpdmState<T> {
         let response: GetVersionRsp = self
             .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
             .validate(&*self)?;
+
+        self.transcript
+            .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
 
         let mut foundver = false;
         for &entry in response.version_number_entries.iter() {
@@ -340,7 +367,11 @@ impl<T: Transport> SpdmState<T> {
             .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
             .validate(&*self)?;
 
+        self.transcript
+            .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
+
         self.rsp_caps = response.flags;
+
         if (self.rsp_caps & SPDM_RSP_MIN_CAPS) != SPDM_RSP_MIN_CAPS {
             dev_err!(
                 &self.dev,
@@ -451,6 +482,9 @@ impl<T: Transport> SpdmState<T> {
             .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
             .validate(&*self)?;
 
+        self.transcript
+            .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
+
         self.base_asym_alg = response.base_asym_sel;
         self.base_hash_alg = response.base_hash_sel;
         self.meas_hash_alg = response.measurement_hash_algo;
@@ -496,6 +530,9 @@ impl<T: Transport> SpdmState<T> {
             .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
             .validate(&*self)?;
 
+        self.transcript
+            .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
+
         let mut deprovisioned_slots = self.provisioned_slots & !response.header.param2;
         while (deprovisioned_slots.trailing_zeros() as usize) < SPDM_SLOTS {
             let slot = deprovisioned_slots.trailing_zeros() as usize;
@@ -535,6 +572,9 @@ impl<T: Transport> SpdmState<T> {
             .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
             .validate(&*self)?;
 
+        self.transcript
+            .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
+
         if (response.header.param1 & 0xF) != slot {
             dev_err!(&self.dev, "Invalid slot response\n");
             return Err(EPROTO);
@@ -567,6 +607,9 @@ impl<T: Transport> SpdmState<T> {
             let response: GetCertificateRsp = self
                 .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
                 .validate(&*self)?;
+
+            self.transcript
+                .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
 
             let portion_length = response.portion_length;
             let rem_length = response.remainder_length;
@@ -763,5 +806,158 @@ impl<T: Transport> SpdmState<T> {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn challenge_rsp_len(&mut self, nonce_len: usize, opaque_len: usize) -> usize {
+        // No measurement summary hash requested (MSHLength == 0)
+        let mut length =
+            core::mem::size_of::<SpdmHeader>() + self.hash_len() + nonce_len + opaque_len + 2;
+
+        if self.version >= SPDM_VER_13 {
+            length += 8;
+        }
+
+        length + self.sig_len
+    }
+
+    fn verify_signature(&mut self, signature: &mut [u8]) -> Result<(), Error> {
+        let crypto = self.crypto.as_mut().ok_or(EPROTO)?;
+        let leaf_key = self.leaf_key.as_ref().ok_or(EPROTO)?;
+        let hash_len = crypto.hash_len();
+        let sig_len = self.sig_len;
+
+        if self.transcript.len() <= sig_len {
+            return Err(EPROTO);
+        }
+
+        let mut m: KVec<u8> = KVec::new();
+        m.extend_with(SPDM_COMBINED_PREFIX_SZ + hash_len, 0, GFP_KERNEL)?;
+
+        // Generate the `unverified_message_hash`, which is the hash of the
+        // `unverified_data` (Chapter 16 - "Signature Verification").
+        crypto.digest(
+            &self.transcript[..(self.transcript.len() - sig_len)],
+            &mut m[SPDM_COMBINED_PREFIX_SZ..],
+        )?;
+
+        // Must be in scope whenever `sig` is used
+        let mut mhash: KVec<u8> = KVec::new();
+
+        let message = if self.version <= SPDM_VER_11 {
+            &m[SPDM_COMBINED_PREFIX_SZ..]
+        } else {
+            // `M` shall be the concatenation of the `combined_spdm_prefix`
+            // and `unverified_message_hash`. We use `M` for pub/priv
+            // signature verification below.
+            // (Chapter 16 - "Signature Verification")
+
+            let major = self.version >> 4;
+            let minor = self.version & 0xF;
+
+            // Generate the `spdm_prefix` (Chapter 15 - "Signature generation")
+            let prefix = CString::try_from_fmt(fmt!("dmtf-spdm-v{major:x}.{minor:x}.*dmtf-spdm-v{major:x}.{minor:x}.*dmtf-spdm-v{major:x}.{minor:x}.*dmtf-spdm-v{major:x}.{minor:x}.*"))?;
+
+            if prefix.to_bytes().len() != SPDM_PREFIX_SZ {
+                dev_err!(&self.dev, "spdm_prefix length is incorrect\n");
+                return Err(EPROTO);
+            }
+
+            // Build the `combined_spdm_prefix` (Chapter 15 - "Signature
+            // generation") directly in `m`: the 64 byte `spdm_prefix`, zero
+            // padding, followed by the 36 byte `spdm_context`. `m` was zero
+            // initialised above with the `unverified_message_hash` copied
+            // in at offset SPDM_COMBINED_PREFIX_SZ, so only the two
+            // non-zero portions need to be written.
+            m[..SPDM_PREFIX_SZ].copy_from_slice(prefix.to_bytes());
+            m[SPDM_COMBINED_PREFIX_SZ - SPDM_CONTEXT.len()..SPDM_COMBINED_PREFIX_SZ]
+                .copy_from_slice(SPDM_CONTEXT.as_bytes());
+
+            // Generate a hash of `M` and use that for signature
+            // verification (RSA or ECDSA)
+            mhash.extend_with(hash_len, 0, GFP_KERNEL)?;
+            crypto.digest(m.as_slice(), mhash.as_mut_slice())?;
+
+            mhash.as_slice()
+        };
+
+        // Finally verify the generated signature against the public key
+        leaf_key.verify_signature(signature, self.base_asym_enc, crypto.name(), message)
+    }
+
+    pub(crate) fn challenge(&mut self, slot: u8) -> Result<(), Error> {
+        let mut request = ChallengeReq::default();
+        request.header.version = self.version;
+        request.header.param1 = slot;
+
+        let nonce_len = request.nonce.len();
+
+        if !self.next_nonce.is_empty() {
+            let request_nonce_len = request.nonce.len();
+
+            if self.next_nonce.len() == request_nonce_len {
+                request
+                    .nonce
+                    .copy_from_slice(&self.next_nonce[..request_nonce_len]);
+            } else {
+                return Err(EINVAL);
+            }
+
+            self.next_nonce.clear();
+        } else {
+            // SAFETY: `request.nonce` is a valid buffer of `nonce_len` length.
+            unsafe {
+                bindings::get_random_bytes(
+                    core::ptr::from_mut(&mut request.nonce).cast::<c_void>(),
+                    nonce_len,
+                )
+            };
+        }
+
+        let rsp_sz = self.challenge_rsp_len(nonce_len, SPDM_MAX_OPAQUE_DATA);
+
+        let mut request_buf = request.to_bytes()?;
+
+        let response_vec: KVec<u8> = KVec::from_elem(0u8, rsp_sz, GFP_KERNEL)?;
+
+        let mut response: ChallengeRsp = self
+            .spdm_exchange(request_buf.as_mut_slice(), response_vec)?
+            .validate(&*self)?;
+
+        self.transcript
+            .extend_from_slice(response.as_bytes()?, GFP_KERNEL)?;
+
+        if request.context != response.context {
+            dev_err!(&self.dev, "Mismatched challenge context response\n");
+            return Err(EPROTO);
+        }
+
+        if (response.header.param1 & 0xF) != slot {
+            dev_err!(&self.dev, "Invalid slot in challenge response\n");
+            return Err(EPROTO);
+        }
+
+        let crypto = self.crypto.as_mut().ok_or(EPROTO)?;
+        let mut hash: KVec<u8> = KVec::new();
+        hash.extend_with(crypto.hash_len(), 0, GFP_KERNEL)?;
+        crypto.digest(&self.certs[slot as usize], hash.as_mut_slice())?;
+
+        if hash.as_slice() != response.cert_chain_hash.as_slice() {
+            dev_err!(
+                &self.dev,
+                "Certificate chain hash mismatch in challenge response\n"
+            );
+            return Err(EKEYREJECTED);
+        }
+
+        match self.verify_signature(&mut response.signature) {
+            Ok(()) => {
+                dev_info!(&self.dev, "Authenticated with certificate slot {slot}\n");
+                Ok(())
+            }
+            Err(e) => {
+                dev_err!(&self.dev, "Cannot verify challenge_auth signature: {e:?}\n");
+                Err(EPROTO)
+            }
+        }
     }
 }
