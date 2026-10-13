@@ -10,12 +10,14 @@
 use crate::consts::{
     SPDM_ASYM_ALGOS,
     SPDM_CAP_SUPPORTED_ALGORITHMS,
+    SPDM_CHALLENGE,
     SPDM_CTEXPONENT,
     SPDM_GET_CAPABILITIES,
     SPDM_GET_CERTIFICATE,
     SPDM_GET_DIGESTS,
     SPDM_GET_VERSION,
     SPDM_HASH_ALGOS,
+    SPDM_MAX_OPAQUE_DATA,
     SPDM_MEAS_SPEC_DMTF,
     SPDM_MIN_DATA_TRANSFER_SIZE,
     SPDM_MIN_VER,
@@ -144,7 +146,6 @@ pub(crate) struct GetVersionRsp {
 }
 
 impl GetVersionRsp {
-    #[expect(dead_code)]
     pub(crate) fn as_bytes(&self) -> Result<&[u8], Error> {
         self.raw_bytes.get(..self.length).ok_or(EPROTO)
     }
@@ -401,7 +402,6 @@ pub(crate) struct GetCapabilitiesRsp {
 }
 
 impl GetCapabilitiesRsp {
-    #[expect(dead_code)]
     pub(crate) fn as_bytes(&self) -> Result<&[u8], Error> {
         self.raw_bytes.get(..self.length).ok_or(EPROTO)
     }
@@ -592,7 +592,6 @@ pub(crate) struct NegotiateAlgsRsp {
 }
 
 impl NegotiateAlgsRsp {
-    #[expect(dead_code)]
     pub(crate) fn as_bytes(&self) -> Result<&[u8], Error> {
         self.raw_bytes.get(..self.length).ok_or(EPROTO)
     }
@@ -762,7 +761,6 @@ pub(crate) struct GetDigestsRsp {
 }
 
 impl GetDigestsRsp {
-    #[expect(dead_code)]
     pub(crate) fn as_bytes(&self) -> Result<&[u8], Error> {
         self.raw_bytes.get(..self.length).ok_or(EPROTO)
     }
@@ -924,7 +922,6 @@ pub(crate) struct GetCertificateRsp {
 }
 
 impl GetCertificateRsp {
-    #[expect(dead_code)]
     pub(crate) fn as_bytes(&self) -> Result<&[u8], Error> {
         self.raw_bytes.get(..self.length).ok_or(EPROTO)
     }
@@ -977,6 +974,155 @@ impl<'c, T: Transport> Validate<'c, Untrusted<KVec<u8>>, &'c SpdmState<'c, T>>
             remainder_length,
             cert_chain,
             length: cert_chain_end,
+            raw_bytes: unvalidated,
+        })
+    }
+}
+
+pub(crate) struct ChallengeReq {
+    pub(crate) header: SpdmHeader,
+
+    pub(crate) nonce: [u8; 32],
+    pub(crate) context: [u8; 8],
+}
+
+impl ChallengeReq {
+    pub(crate) fn to_bytes(&self) -> Result<KVec<u8>> {
+        let mut out = self.header.to_bytes()?;
+
+        out.extend_from_slice(&self.nonce, GFP_KERNEL)?;
+
+        if self.header.version > SPDM_VER_12 {
+            out.extend_from_slice(&self.context, GFP_KERNEL)?;
+        }
+
+        Ok(out)
+    }
+}
+
+impl Default for ChallengeReq {
+    fn default() -> Self {
+        ChallengeReq {
+            header: SpdmHeader::new(SPDM_CHALLENGE),
+
+            nonce: [0; 32],
+            context: [0; 8],
+        }
+    }
+}
+
+#[expect(dead_code)]
+pub(crate) struct ChallengeRsp {
+    pub(crate) header: SpdmHeader,
+
+    pub(crate) cert_chain_hash: KVec<u8>,
+    pub(crate) nonce: [u8; 32],
+
+    pub(crate) opaque_data_len: u16,
+    pub(crate) opaque_data: KVec<u8>,
+
+    /// `RequesterContext`, only present in SPDM 1.3 and later, zeroed otherwise.
+    pub(crate) context: [u8; 8],
+
+    pub(crate) signature: KVec<u8>,
+
+    /// The actual length of the SPDM message. `raw_bytes` might be longer
+    /// as it includes transport specific padding.
+    length: usize,
+
+    /// Entire response, used for the transcript hash.
+    raw_bytes: KVec<u8>,
+}
+
+impl ChallengeRsp {
+    pub(crate) fn as_bytes(&self) -> Result<&[u8], Error> {
+        self.raw_bytes.get(..self.length).ok_or(EPROTO)
+    }
+}
+
+impl<'c, T: Transport> Validate<'c, Untrusted<KVec<u8>>, &'c SpdmState<'c, T>> for ChallengeRsp {
+    type Err = Error;
+
+    fn validate(unvalidated: KVec<u8>, context: &'c SpdmState<'c, T>) -> Result<Self, Self::Err> {
+        let header: SpdmHeader =
+            Untrusted::new(unvalidated.get(0..4).ok_or(EPROTO)?).validate(context)?;
+
+        if header.code != SPDM_CHALLENGE - 0x80 {
+            return Err(EPROTO);
+        }
+
+        if header.version != context.version {
+            pr_err!("Invalid version response\n");
+            return Err(EPROTO);
+        }
+
+        let hash_len = context.hash_len();
+
+        let nonce_offset = mem::size_of::<SpdmHeader>() + hash_len;
+        // MSHLength (H) is always zero as we don't support it
+        let opaque_len_offset = nonce_offset + 32;
+        let opaque_offset = opaque_len_offset + 2;
+
+        let mut cert_chain_hash = KVec::new();
+        cert_chain_hash.extend_from_slice(
+            unvalidated
+                .get(mem::size_of::<SpdmHeader>()..nonce_offset)
+                .ok_or(EPROTO)?,
+            GFP_KERNEL,
+        )?;
+
+        let mut nonce = [0u8; 32];
+        nonce.copy_from_slice(
+            unvalidated
+                .get(nonce_offset..nonce_offset + 32)
+                .ok_or(EPROTO)?,
+        );
+
+        let opaque_data_len = u16::from_le_bytes(
+            unvalidated
+                .get(opaque_len_offset..opaque_len_offset + 2)
+                .ok_or(EPROTO)?
+                .try_into()
+                .map_err(|_| EPROTO)?,
+        );
+
+        if opaque_data_len > SPDM_MAX_OPAQUE_DATA as u16 {
+            return Err(EPROTO);
+        }
+
+        let opaque_end = opaque_offset + opaque_data_len as usize;
+        let mut opaque_data = KVec::new();
+        opaque_data.extend_from_slice(
+            unvalidated.get(opaque_offset..opaque_end).ok_or(EPROTO)?,
+            GFP_KERNEL,
+        )?;
+
+        // `RequesterContext` (8 bytes) is only present in SPDM 1.3 and later.
+        let mut req_context = [0u8; 8];
+        let context_end;
+        if context.version >= SPDM_VER_13 {
+            context_end = opaque_end + 8;
+            req_context.copy_from_slice(unvalidated.get(opaque_end..context_end).ok_or(EPROTO)?);
+        } else {
+            context_end = opaque_end;
+        }
+
+        let signature_end = context_end + context.sig_len;
+        let mut signature = KVec::new();
+        signature.extend_from_slice(
+            unvalidated.get(context_end..signature_end).ok_or(EPROTO)?,
+            GFP_KERNEL,
+        )?;
+
+        Ok(ChallengeRsp {
+            header,
+            cert_chain_hash,
+            nonce,
+            opaque_data_len,
+            opaque_data,
+            context: req_context,
+            signature,
+            length: signature_end,
             raw_bytes: unvalidated,
         })
     }
