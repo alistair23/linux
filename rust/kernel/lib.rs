@@ -153,6 +153,8 @@ pub mod uaccess;
 pub mod usb;
 pub mod validate;
 pub mod workqueue;
+#[cfg(CONFIG_CRYPTO)]
+pub mod x509;
 pub mod xarray;
 
 #[doc(hidden)]
